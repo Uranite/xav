@@ -14,7 +14,11 @@ categories = ["multimedia::video", "command-line-utilities"]
 [features]
 default = []
 static = []
+dynamic = []
 vship = []
+nvidia = []
+amd = []
+use-vcpkg = []
 
 [dependencies]
 libc = "0.2.178"
@@ -24,6 +28,9 @@ av-scenechange = { version = "0.19.2", default-features = false, features = ["ff
 av1-grain = "0.2.5"
 sonic-rs = "0.5.6"
 serde = { version = "1.0.23", features = ["derive"] }
+
+[build-dependencies]
+vcpkg = "0.2"
 
 [profile.release]
 opt-level = 3
