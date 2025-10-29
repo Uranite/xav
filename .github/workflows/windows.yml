@@ -1,0 +1,69 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "ssimu2" ]
+
+jobs:
+  build-windows:
+    name: Build on Windows
+    runs-on: windows-latest
+
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows-static
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Download and extract deps
+        run: |
+          curl -L -o deps.7z "https://github.com/Uranite/xav/releases/download/deps/deps.7z"
+          7z x deps.7z
+
+      - name: Install FFmpeg via vcpkg
+        run: |
+          vcpkg install ffmpeg[avcodec,avdevice,avfilter,avformat,swresample,swscale,zlib,bzip2,core,dav1d,gpl,version3,lzma,openssl,xml2]:x64-windows-static
+          vcpkg integrate install
+
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.29
+        with:
+          cuda: '12.9.1'
+
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Get latest commit
+        id: get_commit
+        shell: pwsh
+        run: |
+          $commit = git log -2 --pretty=format:"%h: %s (%an)" | Select-Object -Last 1
+          echo "message=$commit" >> $env:GITHUB_OUTPUT
+
+      - name: Build
+        run: cargo build --release --features static,vship
+
+      - name: Upload Executable
+        uses: actions/upload-artifact@v5
+        with:
+          name: xav-windows
+          path: target/release/xav.exe
+
+      - name: Delete existing release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --cleanup-tag
+
+      - name: Create prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          tag_name: latest
+          body: |
+            Commit:
+            ${{ steps.get_commit.outputs.message }}
+          files: target/release/xav.exe
+          fail_on_unmatched_files: true
