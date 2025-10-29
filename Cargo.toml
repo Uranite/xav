@@ -13,8 +13,11 @@ categories = ["multimedia::video", "command-line-utilities"]
 
 [features]
 default = []
+dynamic = []
 static = ["av-decoders"]
 vship = []
+nvidia = []
+amd = []
 
 [dependencies]
 libc = "0.2.177"

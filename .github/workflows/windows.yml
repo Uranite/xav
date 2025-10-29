@@ -1,0 +1,125 @@
+name: Rust
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build on Windows
+    runs-on: windows-latest
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Download and extract deps
+        run: |
+          curl -L -o deps.7z "https://github.com/Uranite/xav/releases/download/deps/deps.7z"
+          7z x deps.7z
+
+      - name: Install FFmpeg via vcpkg
+        run: |
+          vcpkg install ffmpeg[avcodec,avdevice,avfilter,avformat,swresample,swscale,zlib,bzip2,core,dav1d,gpl,version3,lzma,openssl,xml2]:x64-windows-static
+          vcpkg integrate install
+
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.29
+        with:
+          cuda: '12.9.1'
+
+      - name: Install HIP SDK
+        shell: pwsh
+        run: |
+          curl.exe -L -o AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe "https://download.amd.com/developer/eula/rocm-hub/AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe"
+          Start-Process -FilePath ".\AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe" -ArgumentList "-install" -Wait
+
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Build (NVIDIA)
+        run: cargo build --release --features static,vship,nvidia
+
+      - name: Package (NVIDIA)
+        shell: pwsh
+        run: |
+          Rename-Item -Path "target/release/xav.exe" -NewName "xav-nvidia.exe"
+          7z a -mx9 target/release/xav-nvidia.7z target/release/xav-nvidia.exe
+      
+      - name: Upload Executable (NVIDIA)
+        uses: actions/upload-artifact@v5
+        with:
+          name: xav-nvidia-win
+          path: target/release/xav-nvidia.7z
+
+      - name: Build (No TQ)
+        run: cargo build --release --features static
+
+      - name: Package (No TQ)
+        shell: pwsh
+        run: |
+          Rename-Item -Path "target/release/xav.exe" -NewName "xav-notq.exe"
+          7z a -mx9 target/release/xav-notq.7z target/release/xav-notq.exe
+
+      - name: Upload Executable (No TQ)
+        uses: actions/upload-artifact@v5
+        with:
+          name: xav-notq-win
+          path: target/release/xav-notq.7z
+
+      - name: Build (AMD)
+        run: cargo build --release --features static,vship,amd
+        env:
+          HIP_PATH: "C:\\Program Files\\AMD\\ROCm\\6.4"
+
+      - name: Package (AMD)
+        shell: pwsh
+        run: |
+          Rename-Item -Path "target/release/xav.exe" -NewName "xav-amd.exe"
+          7z a -mx9 target/release/xav-amd.7z target/release/xav-amd.exe
+      
+      - name: Upload Executable (AMD)
+        uses: actions/upload-artifact@v5
+        with:
+          name: xav-amd-win
+          path: target/release/xav-amd.7z
+
+  release:
+    name: Update Latest Release
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+
+      - name: Download NVIDIA artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: xav-nvidia-win
+
+      - name: Download AMD artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: xav-amd-win
+
+      - name: Download No TQ artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: xav-notq-win
+
+      - name: Update Latest Release
+        uses: softprops/action-gh-release@v2.4.2
+        with:
+          tag_name: latest
+          files: |
+            xav-nvidia.7z
+            xav-amd.7z
+            xav-notq.7z
+          prerelease: true
+          name: Latest Build
+          body: |
+            Automated build from commit ${{ github.sha }}
+            Built on: ${{ github.event.head_commit.timestamp }}
+            
+            Requires SvtAv1EncApp, ffmpeg, ffprobe, and mkvmerge.
+            **Note:** NVIDIA and AMD builds are only required for the target quality feature. You can still use xav for chunked encoding even if you don't have an NVIDIA or AMD GPU.
