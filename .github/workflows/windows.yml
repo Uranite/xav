@@ -1,0 +1,119 @@
+name: Rust
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-windows-nvidia:
+    name: Build on Windows (NVIDIA)
+    runs-on: windows-latest
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Download and extract deps
+        run: |
+          curl -L -o deps.7z "https://github.com/Uranite/xav/releases/download/deps/deps.7z"
+          7z x deps.7z
+
+      - name: Install FFmpeg via vcpkg
+        run: |
+          vcpkg install ffmpeg[avcodec,avdevice,avfilter,avformat,swresample,swscale,zlib,bzip2,core,dav1d,gpl,version3,lzma,openssl,xml2]:x64-windows-static
+          vcpkg integrate install
+
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.29
+        with:
+          cuda: '12.9.1'
+
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Build
+        run: cargo build --release --features static,vship,nvidia
+
+      - name: Upload Executable
+        uses: actions/upload-artifact@v5
+        with:
+          name: xav-nvidia-win
+          path: target/release/xav.exe
+
+  build-windows-amd:
+    name: Build on Windows (AMD)
+    runs-on: windows-latest
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Download and extract deps
+        run: |
+          curl -L -o deps.7z "https://github.com/Uranite/xav/releases/download/deps/deps.7z"
+          7z x deps.7z
+
+      - name: Install FFmpeg via vcpkg
+        run: |
+          vcpkg install ffmpeg[avcodec,avdevice,avfilter,avformat,swresample,swscale,zlib,bzip2,core,dav1d,gpl,version3,lzma,openssl,xml2]:x64-windows-static
+          vcpkg integrate install
+
+      - name: Install HIP SDK
+        shell: pwsh
+        run: |
+          curl.exe -L -o AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe "https://download.amd.com/developer/eula/rocm-hub/AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe"
+          Start-Process -FilePath ".\AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe" -ArgumentList "-install" -Wait
+
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Build
+        run: cargo build --release --features static,vship,amd
+        env:
+          HIP_PATH: "C:\\Program Files\\AMD\\ROCm\\6.4"
+
+      - name: Upload Executable
+        uses: actions/upload-artifact@v5
+        with:
+          name: xav-amd-win
+          path: target/release/xav.exe
+
+  release:
+    name: Update Latest Release
+    needs: [build-windows-nvidia, build-windows-amd]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+
+      - name: Download NVIDIA artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: xav-nvidia-win
+          path: ./nvidia
+
+      - name: Download AMD artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: xav-amd-win
+          path: ./amd
+
+      - name: Rename executables
+        run: |
+          mv ./nvidia/xav.exe ./xav-nvidia.exe
+          mv ./amd/xav.exe ./xav-amd.exe
+
+      - name: Update Latest Release
+        uses: softprops/action-gh-release@v2.4.2
+        with:
+          tag_name: latest
+          files: |
+            xav-nvidia.exe
+            xav-amd.exe
+          prerelease: true
+          name: Latest Build
+          body: |
+            Automated build from commit ${{ github.sha }}
+            Built on: ${{ github.event.head_commit.timestamp }}
+            
+            **Note:** NVIDIA and AMD builds are only required for the target quality feature. You can still use xav for chunked encoding even if you don't have an NVIDIA or AMD GPU.
