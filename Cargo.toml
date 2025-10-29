@@ -14,7 +14,11 @@ categories = ["multimedia::video", "command-line-utilities"]
 [features]
 default = []
 static = []
+dynamic = []
 vship = []
+nvidia = []
+amd = []
+use-vcpkg = []
 
 [dependencies]
 libc = "0.2.178"
@@ -22,6 +26,9 @@ crossbeam-channel = "0.5.15"
 ffms2-sys = { version = "0.3.0", features = ["static"] }
 av-scenechange = { version = "0.19.2", default-features = false, features = ["ffms2", "asm", "nasm-rs", "cc", "libc"] }
 av1-grain = "0.2.5"
+
+[build-dependencies]
+vcpkg = "0.2"
 
 [profile.release]
 opt-level = 3
