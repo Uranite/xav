@@ -23,9 +23,10 @@ jobs:
         run: |
           curl.exe -L -o AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe "https://download.amd.com/developer/eula/rocm-hub/AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe"
           Start-Process -FilePath ".\AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe" -ArgumentList "-install" -Wait
+          echo $env:HIP_PATH
           $HIP_PATH = "C:\Program Files\AMD\ROCm"
-          echo "HIP_PATH=$HIP_PATH" >> $env:GITHUB_ENV
           echo "$HIP_PATH\bin" >> $env:GITHUB_PATH
+          hipcc --help
 
       - name: Install FFmpeg via vcpkg
         run: |
