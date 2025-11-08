@@ -26,7 +26,7 @@ jobs:
           echo $env:HIP_PATH
           $HIP_PATH = "C:\Program Files\AMD\ROCm"
           echo "$HIP_PATH\bin" >> $env:GITHUB_PATH
-          hipcc --help
+          & "$env:HIP_PATH\bin\hipcc.exe" --version
 
       - name: Install FFmpeg via vcpkg
         run: |
