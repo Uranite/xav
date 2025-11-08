@@ -18,11 +18,6 @@ jobs:
           curl -L -o deps.7z "https://github.com/Uranite/xav/releases/download/deps/deps.7z"
           7z x deps.7z
 
-      - name: Install FFmpeg via vcpkg
-        run: |
-          vcpkg install ffmpeg[core,zlib,bzip2,dav1d,gpl,version3,lzma,openssl,xml2]:x64-windows-static
-          vcpkg integrate install
-
       - name: Install HIP SDK
         shell: pwsh
         run: |
@@ -31,6 +26,11 @@ jobs:
           $HIP_PATH = "C:\Program Files\AMD\ROCm"
           echo "HIP_PATH=$HIP_PATH" >> $env:GITHUB_ENV
           echo "$HIP_PATH\bin" >> $env:GITHUB_PATH
+
+      - name: Install FFmpeg via vcpkg
+        run: |
+          vcpkg install ffmpeg[core,zlib,bzip2,dav1d,gpl,version3,lzma,openssl,xml2]:x64-windows-static
+          vcpkg integrate install
 
       - name: Install Rust Nightly
         uses: dtolnay/rust-toolchain@nightly
