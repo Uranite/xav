@@ -1,9 +1,5 @@
 name: Rust
 
-on:
-  push:
-    branches: [ "main" ]
-
 jobs:
   build-windows:
     name: Build on Windows

@@ -14,14 +14,29 @@ fn main() {
 
             #[cfg(feature = "vship")]
             {
+                if !cfg!(feature = "amd") && !cfg!(feature = "nvidia") {
+                    println!("cargo:warning=The 'vship' feature is enabled, but neither 'amd' nor 'nvidia' is selected. Please enable one, e.g., --features vship,amd");
+                }
+
                 // this is zimg and not zlib
                 println!("cargo:rustc-link-lib=static=z");
                 println!("cargo:rustc-link-lib=static=libvship");
 
-                let cuda_path = env::var("CUDA_PATH").expect("CUDA_PATH environment variable not set");
-                let cuda_lib_path = std::path::Path::new(&cuda_path).join("lib").join("x64");
-                println!("cargo:rustc-link-search=native={}", cuda_lib_path.display());
-                println!("cargo:rustc-link-lib=static=cudart_static");
+                #[cfg(feature = "amd")]
+                {
+                    let hip_path = env::var("HIP_PATH").expect("HIP_PATH environment variable not set");
+                    let hip_lib_path = std::path::Path::new(&hip_path).join("lib");
+                    println!("cargo:rustc-link-search=native={}", hip_lib_path.display());
+                    println!("cargo:rustc-link-lib=static=amdhip64");
+                }
+
+                #[cfg(feature = "nvidia")]
+                {
+                    let cuda_path = env::var("CUDA_PATH").expect("CUDA_PATH environment variable not set");
+                    let cuda_lib_path = std::path::Path::new(&cuda_path).join("lib").join("x64");
+                    println!("cargo:rustc-link-search=native={}", cuda_lib_path.display());
+                    println!("cargo:rustc-link-lib=static=cudart_static");
+                }
             }
 
             println!("cargo:rustc-link-lib=mfuuid");
