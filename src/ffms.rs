@@ -1,4 +1,5 @@
 use std::ffi::CString;
+use std::ffi::c_char;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -73,7 +74,7 @@ type IndexCallback = extern "C" fn(current: i64, tot: i64, ic_private: *mut libc
 
 unsafe extern "C" {
     fn FFMS_Init(unused: i32, use_utf8: i32);
-    fn FFMS_CreateIndexer(source: *const i8, err: *mut FFMS_ErrorInfo) -> *mut libc::c_void;
+    fn FFMS_CreateIndexer(source: *const c_char, err: *mut FFMS_ErrorInfo) -> *mut libc::c_void;
     fn FFMS_SetProgressCallback(
         idxer: *mut libc::c_void,
         ic: IndexCallback,
@@ -90,7 +91,7 @@ unsafe extern "C" {
         err: *mut FFMS_ErrorInfo,
     ) -> i32;
     fn FFMS_CreateVideoSource(
-        source: *const i8,
+        source: *const c_char,
         track: i32,
         idx: *mut libc::c_void,
         threads: i32,
@@ -102,14 +103,14 @@ unsafe extern "C" {
     fn FFMS_DestroyVideoSource(v: *mut libc::c_void);
     fn FFMS_DestroyIndex(idx: *mut libc::c_void);
     fn FFMS_WriteIndex(
-        idx_file: *const i8,
+        idx_file: *const c_char,
         idx: *mut libc::c_void,
         err: *mut FFMS_ErrorInfo,
     ) -> i32;
-    fn FFMS_ReadIndex(idx_file: *const i8, err: *mut FFMS_ErrorInfo) -> *mut libc::c_void;
+    fn FFMS_ReadIndex(idx_file: *const c_char, err: *mut FFMS_ErrorInfo) -> *mut libc::c_void;
     fn FFMS_IndexBelongsToFile(
         idx: *mut libc::c_void,
-        source: *const i8,
+        source: *const c_char,
         err: *mut FFMS_ErrorInfo,
     ) -> i32;
 }
