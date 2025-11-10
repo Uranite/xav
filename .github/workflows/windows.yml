@@ -58,12 +58,6 @@ jobs:
           vcpkg install ffmpeg[avcodec,avdevice,avfilter,avformat,swresample,swscale,zlib,bzip2,core,dav1d,gpl,version3,lzma,openssl,xml2]:x64-windows-static
           vcpkg integrate install
 
-      - name: Install HIP SDK
-        shell: pwsh
-        run: |
-          curl.exe -L -o AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe "https://download.amd.com/developer/eula/rocm-hub/AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe"
-          Start-Process -FilePath ".\AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe" -ArgumentList "-install" -Wait
-
       - name: Install Rust Nightly
         uses: dtolnay/rust-toolchain@nightly
 
