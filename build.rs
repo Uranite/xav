@@ -23,11 +23,12 @@ fn main() {
 
                 #[cfg(feature = "amd")]
                 {
-                    println!("cargo:rustc-link-lib=static=libvship-amd");
-                    let hip_path = env::var("HIP_PATH").expect("HIP_PATH environment variable not set");
-                    let hip_lib_path = std::path::Path::new(&hip_path).join("lib");
-                    println!("cargo:rustc-link-search=native={}", hip_lib_path.display());
-                    println!("cargo:rustc-link-lib=static=amdhip64");
+                    // this is not static lol
+                    println!("cargo:rustc-link-lib=libvship-amd");
+                    //let hip_path = env::var("HIP_PATH").expect("HIP_PATH environment variable not set");
+                    //let hip_lib_path = std::path::Path::new(&hip_path).join("lib");
+                    //println!("cargo:rustc-link-search=native={}", hip_lib_path.display());
+                    //println!("cargo:rustc-link-lib=static=amdhip64");
                 }
 
                 #[cfg(feature = "nvidia")]

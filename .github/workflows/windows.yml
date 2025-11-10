@@ -72,11 +72,18 @@ jobs:
         env:
           HIP_PATH: "C:\\Program Files\\AMD\\ROCm\\6.4"
 
-      - name: Upload Executable
+      - name: Create AMD archive
+        run: |
+          mkdir amd
+          copy target\release\xav.exe amd\
+          copy libvship.dll amd\
+          7z a -t7z -mx=9 xav-amd.7z amd\*
+
+      - name: Upload Archive
         uses: actions/upload-artifact@v5
         with:
           name: xav-amd-win
-          path: target/release/xav.exe
+          path: xav-amd.7z
 
   release:
     name: Update Latest Release
@@ -85,6 +92,15 @@ jobs:
     permissions:
       contents: write
     steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+
+      - name: Get previous commit SHA
+        id: prev_commit
+        run: echo "sha=$(git rev-parse HEAD^)" >> $GITHUB_OUTPUT
 
       - name: Download NVIDIA artifact
         uses: actions/download-artifact@v6
@@ -101,7 +117,7 @@ jobs:
       - name: Rename executables
         run: |
           mv ./nvidia/xav.exe ./xav-nvidia.exe
-          mv ./amd/xav.exe ./xav-amd.exe
+          mv ./amd/xav-amd.7z ./xav-amd.7z
 
       - name: Update Latest Release
         uses: softprops/action-gh-release@v2.4.2
@@ -109,11 +125,11 @@ jobs:
           tag_name: latest
           files: |
             xav-nvidia.exe
-            xav-amd.exe
+            xav-amd.7z
           prerelease: true
           name: Latest Build
           body: |
-            Automated build from commit ${{ github.sha }}
+            Commit ${{ steps.prev_commit.outputs.sha }}
             Built on: ${{ github.event.head_commit.timestamp }}
             
             **Note:** NVIDIA and AMD builds are only required for the target quality feature. You can still use xav for chunked encoding even if you don't have an NVIDIA or AMD GPU.
