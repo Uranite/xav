@@ -27,18 +27,31 @@ fn main() {
                 #[cfg(feature = "amd")]
                 {
                     println!("cargo:rustc-link-lib=static=libvship-amd");
-                    let hip_path = env::var("HIP_PATH").expect("HIP_PATH environment variable not set");
-                    let hip_lib_path = std::path::Path::new(&hip_path).join("lib");
-                    println!("cargo:rustc-link-search=native={}", hip_lib_path.display());
+                    match env::var("HIP_PATH") {
+                        Ok(hip_path) => {
+                            let hip_lib_path = std::path::Path::new(&hip_path).join("lib");
+                            println!("cargo:rustc-link-search=native={}", hip_lib_path.display());
+                        },
+                        Err(_) => {
+                            println!("cargo:warning=HIP_PATH environment variable not set.");
+                        }
+                    }
                     println!("cargo:rustc-link-lib=static=amdhip64");
                 }
 
                 #[cfg(feature = "nvidia")]
                 {
                     println!("cargo:rustc-link-lib=static=libvship");
-                    let cuda_path = env::var("CUDA_PATH").expect("CUDA_PATH environment variable not set");
-                    let cuda_lib_path = std::path::Path::new(&cuda_path).join("lib").join("x64");
-                    println!("cargo:rustc-link-search=native={}", cuda_lib_path.display());
+                    match env::var("CUDA_PATH") {
+                        Ok(cuda_path) => {
+                            let cuda_lib_path = std::path::Path::new(&cuda_path).join("lib").join("x64");
+                            println!("cargo:rustc-link-search=native={}", cuda_lib_path.display());
+                            println!("cargo:rustc-link-lib=static=cudart_static");
+                        },
+                        Err(_) => {
+                            println!("cargo:warning=CUDA_PATH environment variable not set.");
+                        }
+                    }
                     println!("cargo:rustc-link-lib=static=cudart_static");
                 }
             }

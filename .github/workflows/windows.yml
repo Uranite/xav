@@ -23,17 +23,6 @@ jobs:
           vcpkg install ffmpeg[avcodec,avdevice,avfilter,avformat,swresample,swscale,zlib,bzip2,core,dav1d,gpl,version3,lzma,openssl,xml2]:x64-windows-static
           vcpkg integrate install
 
-      - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.29
-        with:
-          cuda: '12.9.1'
-
-      - name: Install HIP SDK
-        shell: pwsh
-        run: |
-          curl.exe -L -o AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe "https://download.amd.com/developer/eula/rocm-hub/AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe"
-          Start-Process -FilePath ".\AMD-Software-PRO-Edition-25.Q3-Win10-Win11-For-HIP.exe" -ArgumentList "-install" -Wait
-
       - name: Install Rust Nightly
         uses: dtolnay/rust-toolchain@nightly
 
@@ -69,8 +58,6 @@ jobs:
 
       - name: Build (AMD)
         run: cargo build --release --features static,vship,amd
-        env:
-          HIP_PATH: "C:\\Program Files\\AMD\\ROCm\\6.4"
 
       - name: Package (AMD)
         shell: pwsh
