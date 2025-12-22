@@ -60,6 +60,7 @@ pub struct Args {
 
 extern "C" fn restore() {
     print!("\x1b[?25h\x1b[?1049l");
+    let _ = crossterm::terminal::disable_raw_mode();
     let _ = std::io::stdout().flush();
 }
 extern "C" fn exit_restore(_: i32) {
@@ -97,10 +98,88 @@ fn print_help() {
 
 fn parse_args() -> Args {
     let args: Vec<String> = std::env::args().collect();
-    get_args(&args).unwrap_or_else(|_| {
+    let resume = args.iter().any(|arg| arg == "-r" || arg == "--resume");
+
+    let mut current = get_args(&args).unwrap_or_else(|_| {
         print_help();
         std::process::exit(1);
-    })
+    });
+
+    if resume {
+        if let Ok(saved) = get_saved_args(&current.input) {
+            current = merge_args(saved, current);
+        }
+    }
+
+    apply_defaults(&mut current);
+
+    if current.worker == 0
+        || current.scene_file == PathBuf::new()
+        || current.input == PathBuf::new()
+        || current.output == PathBuf::new()
+    {
+        eprintln!("Missing args");
+        print_help();
+        std::process::exit(1);
+    }
+
+    current
+}
+
+fn merge_args(mut base: Args, over: Args) -> Args {
+    if over.worker != 0 {
+        base.worker = over.worker;
+    }
+    if over.scene_file != PathBuf::new() {
+        base.scene_file = over.scene_file;
+    }
+    if !over.params.is_empty() {
+        base.params = over.params;
+    }
+
+    base.resume = true;
+    if over.quiet {
+        base.quiet = true;
+    }
+    if over.noise.is_some() {
+        base.noise = over.noise;
+    }
+    if over.audio.is_some() {
+        base.audio = over.audio;
+    }
+    if over.input != PathBuf::new() {
+        base.input = over.input;
+    }
+    if over.output != PathBuf::new() {
+        base.output = over.output;
+    }
+    if over.crop.is_some() {
+        base.crop = over.crop;
+    }
+    if over.decode_strat.is_some() {
+        base.decode_strat = over.decode_strat;
+    }
+    if over.chunk_buffer != 0 {
+        base.chunk_buffer = over.chunk_buffer;
+    }
+
+    #[cfg(feature = "vship")]
+    {
+        if over.qp_range.is_some() {
+            base.qp_range = over.qp_range;
+        }
+        if over.metric_worker != 0 {
+            base.metric_worker = over.metric_worker;
+        }
+        if over.target_quality.is_some() {
+            base.target_quality = over.target_quality;
+        }
+        if over.metric_mode != "mean" {
+            base.metric_mode = over.metric_mode;
+        }
+    }
+
+    base
 }
 
 fn apply_defaults(args: &mut Args) {
@@ -252,14 +331,9 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
         i += 1;
     }
 
-    if resume && let Ok(mut saved_args) = get_saved_args(&input) {
-        saved_args.resume = true;
-        return Ok(saved_args);
-    }
-
     let chunk_buffer = worker + chunk_buffer.unwrap_or(0);
 
-    let mut result = Args {
+    let result = Args {
         worker,
         scene_file,
         #[cfg(feature = "vship")]
@@ -281,16 +355,6 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
         #[cfg(feature = "vship")]
         metric_worker,
     };
-
-    apply_defaults(&mut result);
-
-    if result.worker == 0
-        || result.scene_file == PathBuf::new()
-        || result.input == PathBuf::new()
-        || result.output == PathBuf::new()
-    {
-        return Err("Missing args".into());
-    }
 
     Ok(result)
 }
@@ -361,6 +425,7 @@ fn ensure_scene_file(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
 fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     if !args.quiet {
         print!("\x1b[?1049h\x1b[H\x1b[?25l");
+        let _ = crossterm::terminal::enable_raw_mode();
         std::io::stdout().flush().unwrap();
     }
 
@@ -368,6 +433,7 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
 
     if !args.quiet {
         println!();
+        println!("Press 'q' or 'Ctrl+C' to stop safely.");
     }
 
     let hash = hash_input(&args.input);
@@ -427,8 +493,13 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let chunks = chunk::chunkify(&scenes);
 
     let enc_start = std::time::Instant::now();
-    svt::encode_all(&chunks, &inf, &args, &idx, &work_dir, grain_table.as_ref());
+    let completed = svt::encode_all(&chunks, &inf, &args, &idx, &work_dir, grain_table.as_ref());
     let enc_time = enc_start.elapsed();
+
+    if !completed {
+        eprintln!("\n{Y}Encoding aborted. Muxing skipped.{N}");
+        return Ok(());
+    }
 
     let video_mkv = work_dir.join("encode").join("video.mkv");
 
@@ -505,6 +576,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     std::panic::set_hook(Box::new(move |panic_info| {
         print!("\x1b[?25h\x1b[?1049l");
+        let _ = crossterm::terminal::disable_raw_mode();
         let _ = std::io::stdout().flush();
         eprintln!("{panic_info}");
         eprintln!("{}, FAIL", output.display());
@@ -519,6 +591,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Err(e) = main_with_args(&args) {
         print!("\x1b[?1049l");
+        let _ = crossterm::terminal::disable_raw_mode();
         std::io::stdout().flush().unwrap();
         eprintln!("{}, FAIL", args.output.display());
         return Err(e);
