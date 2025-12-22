@@ -45,6 +45,7 @@ pub struct Args {
     pub audio: Option<audio::AudioSpec>,
     pub input: PathBuf,
     pub output: PathBuf,
+    pub crop: Option<String>,
     pub decode_strat: Option<ffms::DecodeStrat>,
     pub chunk_buffer: usize,
     #[cfg(feature = "vship")]
@@ -81,6 +82,7 @@ fn print_help() {
         println!("-f|--qp      CRF range: `-f 0.25-69.75`");
     }
     println!("-n|--noise   Add noise [1-64]: 1=ISO100, 64=ISO6400");
+    println!("-c|--crop    Crop: `20` (all), `20,10` (vert,horz), `132,132,0,0` (t,b,l,r)");
     println!("-s|--sc      Specify SCD file. Auto gen if not specified");
     println!("-b|--buffer  No of chunks to hold in front buffer");
     #[cfg(feature = "vship")]
@@ -145,6 +147,7 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
     let mut resume = false;
     let mut quiet = false;
     let mut noise = None;
+    let mut crop = None;
     let mut audio = None;
     let mut input = PathBuf::new();
     let mut output = PathBuf::new();
@@ -210,6 +213,12 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
                     noise = Some(val * 100);
                 }
             }
+            "-c" | "--crop" => {
+                i += 1;
+                if i < args.len() {
+                    crop = Some(args[i].clone());
+                }
+            }
             "-a" | "--audio" => {
                 i += 1;
                 if i < args.len() {
@@ -263,6 +272,7 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
         resume,
         quiet,
         noise,
+        crop,
         audio,
         input,
         output,
@@ -381,7 +391,18 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut args = args.clone();
 
-    let crop = {
+    let crop = if let Some(ref crop_str) = args.crop {
+        let parts: Result<Vec<u32>, _> = crop_str.split(',').map(|s| s.trim().parse()).collect();
+        match parts {
+            Ok(parts) => match parts.len() {
+                1 => (parts[0], parts[0]),
+                2 => (parts[0], parts[1]),
+                4 => (parts[0].min(parts[1]), parts[2].min(parts[3])),
+                _ => return Err("Invalid crop format: expected 1, 2, or 4 values".into()),
+            },
+            Err(_) => return Err("Invalid crop values".into()),
+        }
+    } else {
         let config = crop::CropDetectConfig { sample_count: 13, min_black_pixels: 2 };
 
         match crop::detect_crop(&idx, &inf, &config) {
