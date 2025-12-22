@@ -1,7 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 mod audio;
@@ -59,9 +58,12 @@ pub struct Args {
 }
 
 extern "C" fn restore() {
-    print!("\x1b[?25h\x1b[?1049l");
+    let _ = crossterm::execute!(
+        std::io::stdout(),
+        crossterm::cursor::Show,
+        crossterm::terminal::LeaveAlternateScreen
+    );
     let _ = crossterm::terminal::disable_raw_mode();
-    let _ = std::io::stdout().flush();
 }
 extern "C" fn exit_restore(_: i32) {
     restore();
@@ -424,9 +426,13 @@ fn ensure_scene_file(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
 
 fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     if !args.quiet {
-        print!("\x1b[?1049h\x1b[H\x1b[?25l");
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::cursor::MoveTo(0, 0),
+            crossterm::cursor::Hide
+        );
         let _ = crossterm::terminal::enable_raw_mode();
-        std::io::stdout().flush().unwrap();
     }
 
     ensure_scene_file(args)?;
@@ -510,8 +516,11 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         if args.audio.is_some() { None } else { Some(&args.input) },
     )?;
 
-    print!("\x1b[?25h\x1b[?1049l");
-    std::io::stdout().flush().unwrap();
+    let _ = crossterm::execute!(
+        std::io::stdout(),
+        crossterm::cursor::Show,
+        crossterm::terminal::LeaveAlternateScreen
+    );
 
     let input_size = fs::metadata(&args.input)?.len();
     let output_size = fs::metadata(&args.output)?.len();
@@ -575,9 +584,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = args.output.clone();
 
     std::panic::set_hook(Box::new(move |panic_info| {
-        print!("\x1b[?25h\x1b[?1049l");
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::cursor::Show,
+            crossterm::terminal::LeaveAlternateScreen
+        );
         let _ = crossterm::terminal::disable_raw_mode();
-        let _ = std::io::stdout().flush();
         eprintln!("{panic_info}");
         eprintln!("{}, FAIL", output.display());
     }));
@@ -590,9 +602,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Err(e) = main_with_args(&args) {
-        print!("\x1b[?1049l");
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
         let _ = crossterm::terminal::disable_raw_mode();
-        std::io::stdout().flush().unwrap();
         eprintln!("{}, FAIL", args.output.display());
         return Err(e);
     }
