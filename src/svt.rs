@@ -294,8 +294,19 @@ pub fn encode_all(
         let inf = inf.clone();
         let sem = Arc::clone(&sem);
         let shutdown = Arc::clone(&shutdown_flag);
+        let seek_mode = if args.resume_fast { 1 } else { 0 };
         thread::spawn(move || {
-            decode_chunks(&chunks, &idx, &inf, &tx, &skip_indices, strat, &sem, &shutdown);
+            decode_chunks(
+                &chunks,
+                &idx,
+                &inf,
+                &tx,
+                &skip_indices,
+                strat,
+                &sem,
+                &shutdown,
+                seek_mode,
+            );
         })
     };
 
@@ -607,6 +618,7 @@ fn encode_tq(
         let permits_done = Arc::clone(&permits);
         let shutdown_decoder = Arc::clone(shutdown);
         let shutdown_bg = Arc::clone(shutdown);
+        let seek_mode = if args.resume_fast { 1 } else { 0 };
 
         thread::spawn(move || {
             let (decode_tx, decode_rx) = bounded::<crate::worker::WorkPkg>(2);
@@ -622,6 +634,7 @@ fn encode_tq(
                     strat,
                     &permits_decoder,
                     &shutdown_decoder,
+                    seek_mode,
                 );
             });
 

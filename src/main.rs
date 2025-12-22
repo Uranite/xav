@@ -39,6 +39,7 @@ pub struct Args {
     pub scene_file: PathBuf,
     pub params: String,
     pub resume: bool,
+    pub resume_fast: bool,
     pub quiet: bool,
     pub noise: Option<u32>,
     pub audio: Option<audio::AudioSpec>,
@@ -95,12 +96,15 @@ fn print_help() {
     println!("-a|--audio   Encode to Opus: `-a \"<auto|norm|bitrate> <all|stream_ids>\"`");
     println!("             `-a \"auto all\"`, `-a \"norm 1\"`, `-a \"128 1,2\"`");
     println!("-r|--resume");
+    println!("-rf|--resume-fast  Resume with fast seeking (less safe but faster)");
     println!("-q|--quiet");
 }
 
 fn parse_args() -> Args {
     let args: Vec<String> = std::env::args().collect();
-    let resume = args.iter().any(|arg| arg == "-r" || arg == "--resume");
+    let resume = args
+        .iter()
+        .any(|arg| arg == "-r" || arg == "--resume" || arg == "-rf" || arg == "--resume-fast");
 
     let mut current = get_args(&args).unwrap_or_else(|_| {
         print_help();
@@ -140,6 +144,9 @@ fn merge_args(mut base: Args, over: Args) -> Args {
     }
 
     base.resume = true;
+    if over.resume_fast {
+        base.resume_fast = true;
+    }
     if over.quiet {
         base.quiet = true;
     }
@@ -226,6 +233,7 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
     let mut qp_range = None;
     let mut params = String::new();
     let mut resume = false;
+    let mut resume_fast = false;
     let mut quiet = false;
     let mut noise = None;
     let mut crop = None;
@@ -280,6 +288,10 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
             }
             "-r" | "--resume" => {
                 resume = true;
+            }
+            "-rf" | "--resume-fast" => {
+                resume = true;
+                resume_fast = true;
             }
             "-q" | "--quiet" => {
                 quiet = true;
@@ -346,6 +358,7 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
         qp_range,
         params,
         resume,
+        resume_fast,
         quiet,
         noise,
         crop,
@@ -368,8 +381,9 @@ fn hash_input(path: &Path) -> String {
 }
 
 fn save_args(work_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let cmd: Vec<String> =
-        std::env::args().filter(|arg| arg != "-r" && arg != "--resume").collect();
+    let cmd: Vec<String> = std::env::args()
+        .filter(|arg| arg != "-r" && arg != "--resume" && arg != "-rf" && arg != "--resume-fast")
+        .collect();
     let quoted_cmd: Vec<String> = cmd
         .iter()
         .map(|arg| if arg.contains(' ') { format!("\"{arg}\"") } else { arg.clone() })
