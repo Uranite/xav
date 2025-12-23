@@ -475,6 +475,25 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let idx = ffms::VidIdx::new(&args.input, args.quiet)?;
     let inf = ffms::get_vidinf(&idx)?;
 
+    let timestamps_path = if args.input.extension().unwrap_or_default().to_string_lossy().eq_ignore_ascii_case("mkv") {
+        let ts_path = work_dir.join("timestamps.txt");
+        let _ = std::process::Command::new("mkvextract")
+            .arg(&args.input)
+            .arg("timestamps_v2")
+            .arg(format!("{}:{}", idx.track, ts_path.display()))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        if ts_path.exists() {
+            Some(ts_path)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let mut args = args.clone();
 
     let crop = if let Some(ref crop_str) = args.crop {
@@ -528,6 +547,7 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         if args.audio.is_some() { &video_mkv } else { &args.output },
         &inf,
         if args.audio.is_some() { None } else { Some(&args.input) },
+        timestamps_path.as_deref(),
     )?;
 
     let _ = crossterm::execute!(
