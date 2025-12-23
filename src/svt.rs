@@ -33,7 +33,7 @@ struct EncConfig<'a> {
     grain_table: Option<&'a Path>,
 }
 
-fn make_enc_cmd(cfg: &EncConfig, quiet: bool, width: u32, height: u32) -> Command {
+fn make_enc_cmd(cfg: &EncConfig, width: u32, height: u32) -> Command {
     let mut cmd = Command::new("SvtAv1EncApp");
 
     let width_str = width.to_string();
@@ -71,7 +71,7 @@ fn make_enc_cmd(cfg: &EncConfig, quiet: bool, width: u32, height: u32) -> Comman
         "--scd",
         "0",
         "--progress",
-        if quiet { "0" } else { "2" },
+        "2",
     ];
 
     for i in (0..base_args.len()).step_by(2) {
@@ -86,10 +86,6 @@ fn make_enc_cmd(cfg: &EncConfig, quiet: bool, width: u32, height: u32) -> Comman
 
     if let Some(grain_path) = cfg.grain_table {
         cmd.arg("--fgs-table").arg(grain_path);
-    }
-
-    if quiet {
-        cmd.arg("--no-progress").arg("1");
     }
 
     cmd.args(cfg.params.split_whitespace())
@@ -154,12 +150,8 @@ impl WorkerStats {
     }
 }
 
-fn load_resume_data(work_dir: &Path, resume: bool) -> ResumeInf {
-    if resume {
-        get_resume(work_dir).unwrap_or(ResumeInf { chnks_done: Vec::new() })
-    } else {
-        ResumeInf { chnks_done: Vec::new() }
-    }
+fn load_resume_data(work_dir: &Path) -> ResumeInf {
+    get_resume(work_dir).unwrap_or(ResumeInf { chnks_done: Vec::new() })
 }
 
 fn build_skip_set(resume_data: &ResumeInf) -> (HashSet<usize>, usize, usize) {
@@ -171,28 +163,6 @@ fn build_skip_set(resume_data: &ResumeInf) -> (HashSet<usize>, usize, usize) {
 
 fn create_stats(completed_count: usize, resume_data: ResumeInf) -> Arc<WorkerStats> {
     Arc::new(WorkerStats::new(completed_count, resume_data))
-}
-
-fn create_progress(
-    quiet: bool,
-    chunks: &[Chunk],
-    inf: &VidInf,
-    worker_count: usize,
-    completed_frames: usize,
-    stats: &Arc<WorkerStats>,
-) -> Option<Arc<ProgsTrack>> {
-    if quiet {
-        None
-    } else {
-        Some(Arc::new(ProgsTrack::new(
-            chunks,
-            inf,
-            worker_count,
-            completed_frames,
-            Arc::clone(&stats.completed),
-            Arc::clone(&stats.completions),
-        )))
-    }
 }
 
 pub fn encode_all(
@@ -254,7 +224,11 @@ pub fn encode_all(
         });
     }
 
-    let resume_data = load_resume_data(work_dir, args.resume);
+    let resume_data = if args.resume {
+        load_resume_data(work_dir)
+    } else {
+        crate::chunk::ResumeInf { chnks_done: Vec::new() }
+    };
 
     #[cfg(feature = "vship")]
     {
@@ -267,14 +241,14 @@ pub fn encode_all(
 
     let (skip_indices, completed_count, completed_frames) = build_skip_set(&resume_data);
     let stats = Some(create_stats(completed_count, resume_data));
-    let prog = create_progress(
-        args.quiet,
+    let prog = Some(Arc::new(ProgsTrack::new(
         chunks,
         inf,
         args.worker,
         completed_frames,
-        stats.as_ref().unwrap(),
-    );
+        Arc::clone(&stats.as_ref().unwrap().completed),
+        Arc::clone(&stats.as_ref().unwrap().completions),
+    )));
 
     let strat = args.decode_strat.unwrap();
     let pipe = Pipeline::new(
@@ -575,7 +549,7 @@ fn encode_tq(
     grain_table: Option<&PathBuf>,
     shutdown: &Arc<std::sync::atomic::AtomicBool>,
 ) {
-    let resume_data = load_resume_data(work_dir, args.resume);
+    let resume_data = load_resume_data(work_dir);
     let (skip_indices, completed_count, completed_frames) = build_skip_set(&resume_data);
 
     let tq_str = args.target_quality.as_ref().unwrap();
@@ -669,14 +643,14 @@ fn encode_tq(
     let resume_state = Arc::new(std::sync::Mutex::new(resume_data.clone()));
     let tq_logger = Arc::new(std::sync::Mutex::new(Vec::new()));
     let stats = Some(create_stats(completed_count, resume_data));
-    let prog = create_progress(
-        args.quiet,
+    let prog = Some(Arc::new(ProgsTrack::new(
         chunks,
         inf,
         args.worker + args.metric_worker,
         completed_frames,
-        stats.as_ref().unwrap(),
-    );
+        Arc::clone(&stats.as_ref().unwrap().completed),
+        Arc::clone(&stats.as_ref().unwrap().completions),
+    )));
 
     let mut metrics_workers = Vec::new();
     for worker_id in 0..args.metric_worker {
@@ -834,7 +808,7 @@ fn enc_tq_probe(
     let name = format!("{:04}_{:.2}.ivf", pkg.chunk.idx, crf);
     let out = work_dir.join("split").join(&name);
     let cfg = EncConfig { inf, params, crf: crf as f32, output: &out, grain_table: grain };
-    let mut cmd = make_enc_cmd(&cfg, false, pkg.width, pkg.height);
+    let mut cmd = make_enc_cmd(&cfg, pkg.width, pkg.height);
     let mut child = cmd.spawn().unwrap();
     let pid = child.id();
     RUNNING_CHILDREN
@@ -920,7 +894,7 @@ fn enc_chunk(
 ) {
     let out = work_dir.join("encode").join(format!("{:04}.ivf", pkg.chunk.idx));
     let cfg = EncConfig { inf, params, crf, output: &out, grain_table: grain };
-    let mut cmd = make_enc_cmd(&cfg, false, pkg.width, pkg.height);
+    let mut cmd = make_enc_cmd(&cfg, pkg.width, pkg.height);
     cmd.stderr(std::process::Stdio::piped());
     let mut child = cmd.spawn().unwrap();
     let pid = child.id();

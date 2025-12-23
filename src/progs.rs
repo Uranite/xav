@@ -21,7 +21,6 @@ const R_DASH: &str = "\x1b[1;91m-";
 pub struct ProgsBar {
     start: Instant,
     total: usize,
-    quiet: bool,
     last_update: Instant,
 }
 
@@ -35,16 +34,12 @@ struct ProgState {
 }
 
 impl ProgsBar {
-    pub fn new(quiet: bool) -> Self {
+    pub fn new() -> Self {
         let now = Instant::now();
-        Self { start: now, total: 0, quiet, last_update: now }
+        Self { start: now, total: 0, last_update: now }
     }
 
     pub fn up_idx(&mut self, current: usize, total: usize) {
-        if self.quiet {
-            return;
-        }
-
         if self.last_update.elapsed() < Duration::from_millis(750) {
             return;
         }
@@ -76,10 +71,6 @@ impl ProgsBar {
     }
 
     pub fn up_scenes(&mut self, current: usize, total: usize) {
-        if self.quiet {
-            return;
-        }
-
         if self.last_update.elapsed() < Duration::from_millis(750) {
             return;
         }
@@ -107,24 +98,20 @@ impl ProgsBar {
         let _ = std::io::stdout().flush();
     }
 
-    pub fn finish(&self) {
-        if !self.quiet {
-            let _ = crossterm::execute!(
-                std::io::stdout(),
-                crossterm::cursor::MoveToColumn(0),
-                crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine)
-            );
-        }
+    pub fn finish() {
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::cursor::MoveToColumn(0),
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine)
+        );
     }
 
-    pub fn finish_scenes(&self) {
-        if !self.quiet {
-            let _ = crossterm::execute!(
-                std::io::stdout(),
-                crossterm::cursor::MoveToColumn(0),
-                crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine)
-            );
-        }
+    pub fn finish_scenes() {
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::cursor::MoveToColumn(0),
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine)
+        );
     }
 }
 
