@@ -137,8 +137,7 @@ fn parse_args() -> Args {
 
     apply_defaults(&mut current);
 
-    if current.worker == 0
-        || current.scene_file == PathBuf::new()
+    if current.scene_file == PathBuf::new()
         || current.input == PathBuf::new()
         || current.output == PathBuf::new()
     {
@@ -213,11 +212,6 @@ fn merge_args(mut base: Args, over: Args) -> Args {
 }
 
 fn apply_defaults(args: &mut Args) {
-    if args.worker == 0 {
-        args.worker = 1;
-        args.params = format!("--lp 1 {}", args.params).trim().to_string();
-    }
-
     if args.output == PathBuf::new() {
         let stem = args.input.file_stem().unwrap().to_string_lossy();
         args.output = args.input.with_file_name(format!("{stem}_av1.mkv"));
@@ -233,9 +227,6 @@ fn apply_defaults(args: &mut Args) {
         if args.target_quality.is_some() && args.qp_range.is_none() {
             args.qp_range = Some("8.0-48.0".to_string());
         }
-        if args.metric_worker == 0 {
-            args.metric_worker = 3;
-        }
     }
 }
 
@@ -244,7 +235,7 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
         return Err("Usage: xav [options] <input> <output>".into());
     }
 
-    let mut worker = 0;
+    let mut worker = 1;
     let mut scene_file = PathBuf::new();
     #[cfg(feature = "vship")]
     let mut target_quality = None;
