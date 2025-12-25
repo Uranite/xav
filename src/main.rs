@@ -55,6 +55,7 @@ pub struct Args {
     pub target_quality: Option<String>,
     #[cfg(feature = "vship")]
     pub metric_mode: String,
+    pub vfr: bool,
 }
 
 extern "C" fn restore() {
@@ -88,10 +89,10 @@ fn print_help() {
         println!("{C}-f {P}┃ {C}--qp      {W}CRF range for TQ: {Y}-f {G}0.25-69.75{W}");
         println!("{C}-v {P}┃ {C}--vship   {W}Metric worker count");
     }
-    println!("-n|--noise   Add noise [1-64]: 1=ISO100, 64=ISO6400");
-    println!("-c|--crop    Crop: `20` (all), `20,10` (vert,horz), `132,132,0,0` (t,b,l,r)");
-    println!("-s|--sc      Specify SCD file. Auto gen if not specified");
-    println!("-b|--buffer  No of chunks to hold in front buffer");
+    println!("    {C}-c {P}┃ {C}--crop    {W}Crop: `20` (all), `20,10` (vert,horz), `132,132,0,0` (t,b,l,r)");
+    println!("    {C}-r {P}┃ {C}--resume  {W}Resume previous session");
+    println!("    {C}-rf {P}┃ {C}--resume-fast  {W}Resume with fast seeking (less safe but faster)");
+    println!("    {C}-vfr {P}┃ {C}--vfr  {W}Extract timestamps from MKV and apply to output (Variable Frame Rate)");
 
     println!();
     println!("{P}Example:{W}");
@@ -109,7 +110,6 @@ fn print_help() {
         println!("    {C}-f {G}4.25-63.75 {P}\\ {B}# {W}Allowed CRF range for target quality mode");
         println!("    {C}-v {R}3 {P}\\ {B}# {W}Spawn {R}3 {W}vship/metric workers");
     }
-    println!("    {C}-r {P}┃ {C}--resume  {W}Resume previous session");
     println!("    {G}input.mkv {P}\\ {B}# {W}Name or path of the input file");
     println!("    {G}output.mkv {B}# {W}Optional output name");
     println!();
@@ -208,6 +208,10 @@ fn merge_args(mut base: Args, over: Args) -> Args {
         base.chunk_buffer = over.chunk_buffer;
     }
 
+    if over.vfr {
+        base.vfr = true;
+    }
+
     base
 }
 
@@ -255,6 +259,7 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
     #[cfg(feature = "vship")]
     let mut metric_worker = 1;
     let mut chunk_buffer = None;
+    let mut vfr = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -342,6 +347,9 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
                     chunk_buffer = Some(args[i].parse()?);
                 }
             }
+            "--vfr" => {
+                vfr = true;
+            }
 
             arg if !arg.starts_with('-') => {
                 if input == PathBuf::new() {
@@ -380,6 +388,7 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
         chunk_buffer,
         #[cfg(feature = "vship")]
         metric_worker,
+        vfr,
     };
 
     Ok(result)
@@ -479,23 +488,6 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let idx = ffms::VidIdx::new(&args.input, true)?;
     let inf = ffms::get_vidinf(&idx)?;
 
-    let timestamps_path =
-        if args.input.extension().unwrap_or_default().to_string_lossy().eq_ignore_ascii_case("mkv")
-        {
-            let ts_path = work_dir.join("timestamps.txt");
-            let _ = std::process::Command::new("mkvextract")
-                .arg(&args.input)
-                .arg("timestamps_v2")
-                .arg(format!("{}:{}", idx.track, ts_path.display()))
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-
-            if ts_path.exists() { Some(ts_path) } else { None }
-        } else {
-            None
-        };
-
     let mut args = args.clone();
 
     let crop = if let Some(ref crop_str) = args.crop {
@@ -543,6 +535,25 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let video_mkv = work_dir.join("encode").join("video.mkv");
+
+    let timestamps_path = if args.vfr
+        && args.input.extension().unwrap_or_default().to_string_lossy().eq_ignore_ascii_case("mkv")
+    {
+        let ts_path = work_dir.join("timestamps.txt");
+        if !ts_path.exists() {
+            let _ = std::process::Command::new("mkvextract")
+                .arg(&args.input)
+                .arg("timestamps_v2")
+                .arg(format!("{}:{}", idx.track, ts_path.display()))
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+
+        if ts_path.exists() { Some(ts_path) } else { None }
+    } else {
+        None
+    };
 
     chunk::merge_out(
         &work_dir.join("encode"),
