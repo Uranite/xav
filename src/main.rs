@@ -89,10 +89,10 @@ fn print_help() {
         println!("{C}-f {P}┃ {C}--qp      {W}CRF range for TQ: {Y}-f {G}0.25-69.75{W}");
         println!("{C}-v {P}┃ {C}--vship   {W}Metric worker count");
     }
-    println!("    {C}-c {P}┃ {C}--crop    {W}Crop: `20` (all), `20,10` (vert,horz), `132,132,0,0` (t,b,l,r)");
-    println!("    {C}-r {P}┃ {C}--resume  {W}Resume previous session");
-    println!("    {C}-rf {P}┃ {C}--resume-fast  {W}Resume with fast seeking (less safe but faster)");
-    println!("    {C}-vfr {P}┃ {C}--vfr  {W}Extract timestamps from MKV and apply to output (Variable Frame Rate)");
+    println!("{C}-c {P}┃ {C}--crop    {W}Crop: `20` (all), `20,10` (vert,horz), `132,132,0,0` (t,b,l,r)");
+    println!("{C}-r {P}┃ {C}--resume  {W}Resume previous session");
+    println!("{C}-rf {P}┃ {C}--resume-fast  {W}Resume with fast seeking (less safe but faster)");
+    println!("{C}-vfr {P}┃ {C}--vfr  {W}Extract timestamps from MKV and apply to output (Variable Frame Rate)");
 
     println!();
     println!("{P}Example:{W}");
