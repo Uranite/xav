@@ -563,6 +563,11 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         timestamps_path.as_deref(),
     )?;
 
+    if let Some(ref audio_spec) = args.audio {
+        audio::process_audio(audio_spec, &args.input, &video_mkv, &args.output)?;
+        fs::remove_file(&video_mkv)?;
+    }
+
     let _ = crossterm::execute!(
         std::io::stdout(),
         crossterm::cursor::Show,
@@ -615,11 +620,6 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     final_width, final_height, fps_rate, dh, dm, ds, "",
     eh, em, es, enc_speed, ""
 );
-
-    if let Some(ref audio_spec) = args.audio {
-        audio::process_audio(audio_spec, &args.input, &video_mkv, &args.output)?;
-        fs::remove_file(&video_mkv)?;
-    }
 
     fs::remove_dir_all(&work_dir)?;
 
