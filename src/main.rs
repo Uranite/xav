@@ -75,24 +75,24 @@ extern "C" fn exit_restore(_: i32) {
 fn print_help() {
     println!("{P}Format: {Y}xav {C}[options] {G}<INPUT> {B}[<OUTPUT>]{W}");
     println!();
-    println!("{C}-p {P}┃ {C}--param   {W}Encoder params: {Y}-p {G}\"--scm 0\"{W}");
-    println!("{C}-w {P}┃ {C}--worker  {W}Encoder count{W}");
-    println!("{C}-b {P}┃ {C}--buffer  {W}No of chunks to hold in front buffer{W}");
-    println!("{C}-s {P}┃ {C}--sc      {W}Specify SCD file. Auto gen if not specified{W}");
-    println!("{C}-n {P}┃ {C}--noise   {W}Add noise {B}[1-64]{W}: {R}1{B}={W}ISO100, {R}64{B}={W}ISO6400");
-    println!("{C}-a {P}┃ {C}--audio   {W}Encode to Opus: {Y}-a {G}\"{R}<{G}auto{P}┃{G}norm{P}┃{G}bitrate{R}> {R}<{G}all{P}┃{G}stream_ids{R}>{G}\"");
-    println!("               {B}Examples: {Y}-a {G}\"auto all\"{W}, {Y}-a {G}\"norm 1\"{W}, {Y}-a {G}\"128 1,2\"");
+    println!("{C}-p   {P}┃ {C}--param        {W}Encoder params: {Y}-p {G}\"--scm 0\"{W}");
+    println!("{C}-w   {P}┃ {C}--worker       {W}Encoder count{W}");
+    println!("{C}-b   {P}┃ {C}--buffer       {W}No of chunks to hold in front buffer{W}");
+    println!("{C}-s   {P}┃ {C}--sc           {W}Specify SCD file. Auto gen if not specified{W}");
+    println!("{C}-n   {P}┃ {C}--noise        {W}Add noise {B}[1-64]{W}: {R}1{B}={W}ISO100, {R}64{B}={W}ISO6400");
+    println!("{C}-a   {P}┃ {C}--audio        {W}Encode to Opus: {Y}-a {G}\"{R}<{G}auto{P}┃{G}norm{P}┃{G}bitrate{R}> {R}<{G}all{P}┃{G}stream_ids{R}>{G}\"");
+    println!("                  {B}Examples: {Y}-a {G}\"auto all\"{W}, {Y}-a {G}\"norm 1\"{W}, {Y}-a {G}\"128 1,2\"");
     #[cfg(feature = "vship")]
     {
-        println!("{C}-t {P}┃ {C}--tq      {W}TQ Range: {R}<8{B}={W}Butter5pn, {R}8-10{B}={W}CVVDP, {R}>10{B}={W}SSIMU2: {Y}-t {G}9.00-9.01");
-        println!("{C}-m {P}┃ {C}--mode    {W}TQ Metric aggregation: {G}mean {W}or mean of worst N%: {G}p0.1");
-        println!("{C}-f {P}┃ {C}--qp      {W}CRF range for TQ: {Y}-f {G}0.25-69.75{W}");
-        println!("{C}-v {P}┃ {C}--vship   {W}Metric worker count");
+        println!("{C}-t   {P}┃ {C}--tq           {W}TQ Range: {R}<8{B}={W}Butter5pn, {R}8-10{B}={W}CVVDP, {R}>10{B}={W}SSIMU2: {Y}-t {G}9.00-9.01");
+        println!("{C}-m   {P}┃ {C}--mode         {W}TQ Metric aggregation: {G}mean {W}or mean of worst N%: {G}p0.1");
+        println!("{C}-f   {P}┃ {C}--qp           {W}CRF range for TQ: {Y}-f {G}0.25-69.75{W}");
+        println!("{C}-v   {P}┃ {C}--vship        {W}Metric worker count");
     }
-    println!("{C}-c {P}┃ {C}--crop    {W}Crop: `20` (all), `20,10` (vert,horz), `132,132,0,0` (t,b,l,r)");
-    println!("{C}-r {P}┃ {C}--resume  {W}Resume previous session");
-    println!("{C}-rf {P}┃ {C}--resume-fast  {W}Resume with fast seeking (less safe but faster)");
-    println!("{C}-vfr {P}┃ {C}--vfr  {W}Extract timestamps from MKV and apply to output (Variable Frame Rate)");
+    println!("{C}-c   {P}┃ {C}--crop         {W}Crop: `20` (all), `20,10` (vert,horz), `132,132,0,0` (t,b,l,r)");
+    println!("{C}-r   {P}┃ {C}--resume       {W}Resume previous session");
+    println!("{C}-rf  {P}┃ {C}--resume-fast  {W}Resume with fast seeking (less safe but faster)");
+    println!("{C}-vfr {P}┃ {C}--vfr          {W}Extract timestamps from MKV and apply to output (Variable Frame Rate)");
 
     println!();
     println!("{P}Example:{W}");

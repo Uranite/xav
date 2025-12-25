@@ -62,7 +62,7 @@ impl ProgsBar {
             crossterm::cursor::MoveToColumn(0),
             crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine),
             crossterm::style::Print(format!(
-                "{W}IDX: {C}[{bar}{C}] {W}{perc}%{C}, {Y}{mbps} MBs{C}, \
+                "{W}IDX: {C}[{bar}{C}] {W}{perc}%{C}, {Y}{mbps} MBs{C}, eta \
                  {W}{eta_h:02}{P}:{W}{eta_m:02}{P}:{W}{eta_s:02}{C}, \
                  {G}{mb_current}{C}/{R}{mb_total}{N}"
             ))
@@ -91,7 +91,7 @@ impl ProgsBar {
             crossterm::cursor::MoveToColumn(0),
             crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine),
             crossterm::style::Print(format!(
-                "{W}SCD: {C}[{bar}{C}] {W}{perc}%{C}, {Y}{fps} FPS{C}, \
+                "{W}SCD: {C}[{bar}{C}] {W}{perc}%{C}, {Y}{fps} FPS{C}, eta \
                  {W}{eta_h:02}{P}:{W}{eta_m:02}{P}:{W}{eta_s:02}{C}, {G}{current}{C}/{R}{total}{N}"
             ))
         );
@@ -407,8 +407,8 @@ fn draw_screen(
         crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine),
         crossterm::style::Print(format!(
             "{W}{h:02}{P}:{W}{m:02} {C}[{G}{chunks_done}{C}/{R}{}{C}] [{bar}{C}] {W}{perc}% \
-             {G}{frames_done}{C}/{R}{} {C}({Y}{fps:.2}{C}, {W}{eta_h:02}{P}:{W}{eta_m:02}{C}, \
-             {bitrate_str}{C}, {est_str}{C}{N})\n",
+             {G}{frames_done}{C}/{R}{} {C}({Y}{fps:.2} fps{C}, eta \
+             {W}{eta_h:02}{P}:{W}{eta_m:02}{C}, {bitrate_str}{C}, {est_str}{C}{N})\n",
             state.total_chunks, state.total_frames
         ))
     );
