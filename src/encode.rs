@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
 
@@ -10,6 +9,7 @@ use crossbeam_channel::select;
 
 use crate::chunk::{Chunk, ChunkComp, ResumeInf, get_resume};
 use crate::decode::decode_chunks;
+use crate::encoder::{EncConfig, Encoder, make_enc_cmd};
 use crate::ffms::{VidIdx, VidInf};
 use crate::pipeline::Pipeline;
 use crate::progs::ProgsTrack;
@@ -20,112 +20,16 @@ use crate::worker::TQState;
 #[cfg(feature = "vship")]
 pub static TQ_SCORES: std::sync::OnceLock<std::sync::Mutex<Vec<f64>>> = std::sync::OnceLock::new();
 
-pub static RUNNING_CHILDREN: std::sync::OnceLock<std::sync::Mutex<HashSet<u32>>> =
-    std::sync::OnceLock::new();
-pub static SHUTDOWN_GLOBAL: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
-struct EncConfig<'a> {
-    inf: &'a VidInf,
-    params: &'a str,
-    crf: f32,
-    output: &'a Path,
-    grain_table: Option<&'a Path>,
-}
-
-fn make_enc_cmd(cfg: &EncConfig, width: u32, height: u32) -> Command {
-    let mut cmd = Command::new("SvtAv1EncApp");
-
-    let width_str = width.to_string();
-    let height_str = height.to_string();
-    let fps_num_str = cfg.inf.fps_num.to_string();
-    let fps_den_str = cfg.inf.fps_den.to_string();
-
-    let base_args = [
-        "-i",
-        "stdin",
-        "--input-depth",
-        "10",
-        "--color-format",
-        "1",
-        "--profile",
-        "0",
-        "--passes",
-        "1",
-        "--width",
-        &width_str,
-        "--forced-max-frame-width",
-        &width_str,
-        "--height",
-        &height_str,
-        "--forced-max-frame-height",
-        &height_str,
-        "--fps-num",
-        &fps_num_str,
-        "--fps-denom",
-        &fps_den_str,
-        "--keyint",
-        "0",
-        "--rc",
-        "0",
-        "--scd",
-        "0",
-        "--progress",
-        "2",
-    ];
-
-    for i in (0..base_args.len()).step_by(2) {
-        cmd.arg(base_args[i]).arg(base_args[i + 1]);
-    }
-
-    if cfg.crf >= 0.0 {
-        cmd.arg("--crf").arg(format!("{:.2}", cfg.crf));
-    }
-
-    colorize(&mut cmd, cfg.inf);
-
-    if let Some(grain_path) = cfg.grain_table {
-        cmd.arg("--fgs-table").arg(grain_path);
-    }
-
-    cmd.args(cfg.params.split_whitespace())
-        .arg("-b")
-        .arg(cfg.output)
-        .stdin(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    cmd
-}
-
-fn colorize(cmd: &mut Command, inf: &VidInf) {
-    if let Some(cp) = inf.color_primaries {
-        cmd.args(["--color-primaries", &cp.to_string()]);
-    }
-    if let Some(tc) = inf.transfer_characteristics {
-        cmd.args(["--transfer-characteristics", &tc.to_string()]);
-    }
-    if let Some(mc) = inf.matrix_coefficients {
-        cmd.args(["--matrix-coefficients", &mc.to_string()]);
-    }
-    if let Some(cr) = inf.color_range {
-        cmd.args(["--color-range", &cr.to_string()]);
-    }
-    if let Some(csp) = inf.chroma_sample_position {
-        cmd.args(["--chroma-sample-position", &csp.to_string()]);
-    }
-    if let Some(ref md) = inf.mastering_display {
-        cmd.args(["--mastering-display", md]);
-    }
-    if let Some(ref cl) = inf.content_light {
-        cmd.args(["--content-light", cl]);
-    }
-}
-
 #[inline]
 pub fn get_frame(frames: &[u8], i: usize, frame_size: usize) -> &[u8] {
     let start = i * frame_size;
     &frames[start..start + frame_size]
 }
+
+pub static RUNNING_CHILDREN: std::sync::OnceLock<std::sync::Mutex<HashSet<u32>>> =
+    std::sync::OnceLock::new();
+pub static SHUTDOWN_GLOBAL: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 struct WorkerStats {
     completed: Arc<std::sync::atomic::AtomicUsize>,
@@ -241,14 +145,14 @@ pub fn encode_all(
 
     let (skip_indices, completed_count, completed_frames) = build_skip_set(&resume_data);
     let stats = Some(create_stats(completed_count, resume_data));
-    let prog = Some(Arc::new(ProgsTrack::new(
+    let prog = Arc::new(ProgsTrack::new(
         chunks,
         inf,
         args.worker,
         completed_frames,
         Arc::clone(&stats.as_ref().unwrap().completed),
         Arc::clone(&stats.as_ref().unwrap().completions),
-    )));
+    ));
 
     let strat = args.decode_strat.unwrap();
     let pipe = Pipeline::new(
@@ -293,9 +197,10 @@ pub fn encode_all(
         let stats_clone = stats.clone();
         let grain = grain_table.cloned();
         let wd = work_dir.to_path_buf();
-        let prog_clone = prog.clone();
+        let prog_clone = Arc::clone(&prog);
         let sem_clone = Arc::clone(&sem);
         let shutdown_clone = Arc::clone(&shutdown_flag);
+        let encoder = args.encoder;
 
         let handle = thread::spawn(move || {
             run_enc_worker(
@@ -306,10 +211,11 @@ pub fn encode_all(
                 &wd,
                 grain.as_deref(),
                 stats_clone.as_ref(),
-                prog_clone.as_ref(),
+                &prog_clone,
                 worker_id,
                 &sem_clone,
                 &shutdown_clone,
+                encoder,
             );
         });
         workers.push(handle);
@@ -332,6 +238,7 @@ struct TQCtx {
     qp_max: f64,
     use_butteraugli: bool,
     use_cvvdp: bool,
+    cvvdp_config: Option<&'static str>,
 }
 
 #[cfg(feature = "vship")]
@@ -446,7 +353,7 @@ fn run_metrics_worker(
     stats: Option<&Arc<WorkerStats>>,
     resume_state: &Arc<std::sync::Mutex<crate::chunk::ResumeInf>>,
     tq_logger: &Arc<std::sync::Mutex<Vec<crate::tq::ProbeLog>>>,
-    prog: Option<&Arc<crate::progs::ProgsTrack>>,
+    prog: &Arc<crate::progs::ProgsTrack>,
     worker_id: usize,
     worker_count: usize,
     tq_ctx: &TQCtx,
@@ -477,6 +384,8 @@ fn run_metrics_worker(
                     fps,
                     tq_ctx.use_cvvdp,
                     tq_ctx.use_butteraugli,
+                    Some("xav_screen"),
+                    tq_ctx.cvvdp_config,
                 )
                 .unwrap(),
             );
@@ -500,7 +409,7 @@ fn run_metrics_worker(
             vship.as_ref().unwrap(),
             metric_mode,
             &mut unpacked_buf,
-            prog,
+            Some(prog),
             metrics_slot,
             crf as f32,
             last_score,
@@ -559,6 +468,9 @@ fn encode_tq(
     let tq_target = f64::midpoint(tq_parts[0], tq_parts[1]);
     let tq_tolerance = (tq_parts[1] - tq_parts[0]) / 2.0;
 
+    let cvvdp_config_static: Option<&'static str> =
+        args.cvvdp_config.as_ref().map(|s| Box::leak(s.clone().into_boxed_str()) as &'static str);
+
     let tq_ctx = TQCtx {
         target: tq_target,
         tolerance: tq_tolerance,
@@ -566,6 +478,7 @@ fn encode_tq(
         qp_max: qp_parts[1],
         use_butteraugli: tq_target < 8.0,
         use_cvvdp: tq_target > 8.0 && tq_target <= 10.0,
+        cvvdp_config: cvvdp_config_static,
     };
 
     let strat = args.decode_strat.unwrap();
@@ -643,14 +556,14 @@ fn encode_tq(
     let resume_state = Arc::new(std::sync::Mutex::new(resume_data.clone()));
     let tq_logger = Arc::new(std::sync::Mutex::new(Vec::new()));
     let stats = Some(create_stats(completed_count, resume_data));
-    let prog = Some(Arc::new(ProgsTrack::new(
+    let prog = Arc::new(ProgsTrack::new(
         chunks,
         inf,
         args.worker + args.metric_worker,
         completed_frames,
         Arc::clone(&stats.as_ref().unwrap().completed),
         Arc::clone(&stats.as_ref().unwrap().completions),
-    )));
+    ));
 
     let mut metrics_workers = Vec::new();
     for worker_id in 0..args.metric_worker {
@@ -664,7 +577,7 @@ fn encode_tq(
         let st = stats.clone();
         let resume_state = Arc::clone(&resume_state);
         let tq_logger = Arc::clone(&tq_logger);
-        let prog_clone = prog.clone();
+        let prog_clone = Arc::clone(&prog);
         let worker_count = args.worker;
         let shutdown = Arc::clone(shutdown);
         let input_path = args.input.clone();
@@ -688,7 +601,7 @@ fn encode_tq(
                 st.as_ref(),
                 &resume_state,
                 &tq_logger,
-                prog_clone.as_ref(),
+                &prog_clone,
                 worker_id,
                 worker_count,
                 &tq_ctx,
@@ -713,6 +626,7 @@ fn encode_tq(
         let qp_max = tq_ctx.qp_max;
         let target = tq_ctx.target;
         let shutdown_worker = Arc::clone(shutdown);
+        let encoder = args.encoder;
 
         workers.push(thread::spawn(move || {
             let mut conv_buf = vec![0u8; pipe.conv_buf_size];
@@ -722,22 +636,18 @@ fn encode_tq(
                     continue;
                 }
 
-                if pkg.tq_state.is_none() {
-                    pkg.tq_state = Some(crate::worker::TQState {
-                        probes: Vec::new(),
-                        probe_sizes: Vec::new(),
-                        search_min: qp_min,
-                        search_max: qp_max,
-                        round: 1,
-                        target,
-                        last_crf: 0.0,
-                    });
-                } else {
-                    pkg.tq_state.as_mut().unwrap().round += 1;
-                }
+                let tq = pkg.tq_state.get_or_insert_with(|| crate::worker::TQState {
+                    probes: Vec::new(),
+                    probe_sizes: Vec::new(),
+                    search_min: qp_min,
+                    search_max: qp_max,
+                    round: 0,
+                    target,
+                    last_crf: 0.0,
+                });
+                tq.round += 1;
 
-                let current_round = pkg.tq_state.as_ref().unwrap().round;
-                let tq = pkg.tq_state.as_ref().unwrap();
+                let current_round = tq.round;
                 let crf = if current_round <= 2 {
                     crate::tq::binary_search(tq.search_min, tq.search_max)
                 } else {
@@ -746,7 +656,7 @@ fn encode_tq(
                 }
                 .clamp(tq.search_min, tq.search_max);
 
-                pkg.tq_state.as_mut().unwrap().last_crf = crf;
+                tq.last_crf = crf;
 
                 enc_tq_probe(
                     &pkg,
@@ -757,8 +667,9 @@ fn encode_tq(
                     &wd,
                     grain.as_deref(),
                     &mut conv_buf,
-                    prog_clone.as_ref(),
+                    &prog_clone,
                     worker_id,
+                    encoder,
                 );
 
                 tx.send(pkg).unwrap();
@@ -802,13 +713,22 @@ fn enc_tq_probe(
     work_dir: &Path,
     grain: Option<&Path>,
     conv_buf: &mut [u8],
-    prog: Option<&Arc<ProgsTrack>>,
+    prog: &Arc<ProgsTrack>,
     worker_id: usize,
+    encoder: Encoder,
 ) -> PathBuf {
     let name = format!("{:04}_{:.2}.ivf", pkg.chunk.idx, crf);
     let out = work_dir.join("split").join(&name);
-    let cfg = EncConfig { inf, params, crf: crf as f32, output: &out, grain_table: grain };
-    let mut cmd = make_enc_cmd(&cfg, pkg.width, pkg.height);
+    let cfg = EncConfig {
+        inf,
+        params,
+        crf: crf as f32,
+        output: &out,
+        grain_table: grain,
+        width: pkg.width,
+        height: pkg.height,
+    };
+    let mut cmd = make_enc_cmd(encoder, &cfg);
     let mut child = cmd.spawn().unwrap();
     let pid = child.id();
     RUNNING_CHILDREN
@@ -817,13 +737,25 @@ fn enc_tq_probe(
         .unwrap()
         .insert(pid);
 
-    if let Some(p) = prog {
-        let stderr = child.stderr.take().unwrap();
-        let last_score =
-            pkg.tq_state.as_ref().and_then(|tq| tq.probes.last().map(|probe| probe.score));
-        p.watch_enc(stderr, worker_id, pkg.chunk.idx, false, Some((crf as f32, last_score)));
+    let last_score = pkg.tq_state.as_ref().and_then(|tq| tq.probes.last().map(|probe| probe.score));
+    match encoder {
+        Encoder::SvtAv1 => prog.watch_enc(
+            child.stderr.take().unwrap(),
+            worker_id,
+            pkg.chunk.idx,
+            false,
+            Some((crf as f32, last_score)),
+            encoder,
+        ),
+        Encoder::Avm => prog.watch_enc(
+            child.stdout.take().unwrap(),
+            worker_id,
+            pkg.chunk.idx,
+            false,
+            Some((crf as f32, last_score)),
+            encoder,
+        ),
     }
-
     (pipe.write_frames)(child.stdin.as_mut().unwrap(), &pkg.yuv, pkg.frame_count, conv_buf, pipe);
 
     let status = child.wait().unwrap();
@@ -849,20 +781,33 @@ fn run_enc_worker(
     work_dir: &Path,
     grain: Option<&Path>,
     stats: Option<&Arc<WorkerStats>>,
-    prog: Option<&Arc<ProgsTrack>>,
+    prog: &Arc<ProgsTrack>,
     worker_id: usize,
     sem: &Arc<Semaphore>,
     shutdown: &Arc<std::sync::atomic::AtomicBool>,
+    encoder: Encoder,
 ) {
     let mut conv_buf = vec![0u8; pipe.conv_buf_size];
 
-    while let Ok(pkg) = rx.recv() {
+    while let Ok(mut pkg) = rx.recv() {
         if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
             sem.release();
             continue;
         }
 
-        enc_chunk(&pkg, -1.0, params, inf, pipe, work_dir, grain, &mut conv_buf, prog, worker_id);
+        enc_chunk(
+            &mut pkg,
+            -1.0,
+            params,
+            inf,
+            pipe,
+            work_dir,
+            grain,
+            &mut conv_buf,
+            prog,
+            worker_id,
+            encoder,
+        );
 
         if let Some(s) = stats {
             s.completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -881,7 +826,7 @@ fn run_enc_worker(
 }
 
 fn enc_chunk(
-    pkg: &crate::worker::WorkPkg,
+    pkg: &mut crate::worker::WorkPkg,
     crf: f32,
     params: &str,
     inf: &VidInf,
@@ -889,13 +834,21 @@ fn enc_chunk(
     work_dir: &Path,
     grain: Option<&Path>,
     conv_buf: &mut [u8],
-    prog: Option<&Arc<ProgsTrack>>,
+    prog: &Arc<ProgsTrack>,
     worker_id: usize,
+    encoder: Encoder,
 ) {
     let out = work_dir.join("encode").join(format!("{:04}.ivf", pkg.chunk.idx));
-    let cfg = EncConfig { inf, params, crf, output: &out, grain_table: grain };
-    let mut cmd = make_enc_cmd(&cfg, pkg.width, pkg.height);
-    cmd.stderr(std::process::Stdio::piped());
+    let cfg = EncConfig {
+        inf,
+        params,
+        crf,
+        output: &out,
+        grain_table: grain,
+        width: pkg.width,
+        height: pkg.height,
+    };
+    let mut cmd = make_enc_cmd(encoder, &cfg);
     let mut child = cmd.spawn().unwrap();
     let pid = child.id();
     RUNNING_CHILDREN
@@ -904,12 +857,27 @@ fn enc_chunk(
         .unwrap()
         .insert(pid);
 
-    if let Some(p) = prog {
-        let stderr = child.stderr.take().unwrap();
-        p.watch_enc(stderr, worker_id, pkg.chunk.idx, true, None);
+    match encoder {
+        Encoder::SvtAv1 => prog.watch_enc(
+            child.stderr.take().unwrap(),
+            worker_id,
+            pkg.chunk.idx,
+            true,
+            None,
+            encoder,
+        ),
+        Encoder::Avm => prog.watch_enc(
+            child.stdout.take().unwrap(),
+            worker_id,
+            pkg.chunk.idx,
+            true,
+            None,
+            encoder,
+        ),
     }
 
     (pipe.write_frames)(child.stdin.as_mut().unwrap(), &pkg.yuv, pkg.frame_count, conv_buf, pipe);
+    pkg.yuv = Vec::new();
 
     let status = child.wait().unwrap();
     if let Some(children) = RUNNING_CHILDREN.get() {

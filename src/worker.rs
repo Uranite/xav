@@ -53,15 +53,6 @@ impl Semaphore {
         Self { state: Mutex::new(permits), cvar: Condvar::new() }
     }
 
-    #[allow(dead_code)]
-    pub fn acquire(&self) {
-        let mut count = self.state.lock().unwrap();
-        while *count == 0 {
-            count = self.cvar.wait(count).unwrap();
-        }
-        *count -= 1;
-    }
-
     pub fn acquire_interruptible(&self, shutdown: &std::sync::atomic::AtomicBool) -> bool {
         let mut count = self.state.lock().unwrap();
         loop {
