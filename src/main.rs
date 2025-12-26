@@ -71,6 +71,7 @@ extern "C" fn restore() {
         crossterm::cursor::Show,
         crossterm::terminal::LeaveAlternateScreen
     );
+    let _ = crossterm::terminal::disable_raw_mode();
 }
 extern "C" fn exit_restore(_: i32) {
     restore();
@@ -497,10 +498,12 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         crossterm::cursor::MoveTo(0, 0),
         crossterm::cursor::Hide
     );
+    let _ = crossterm::terminal::enable_raw_mode();
 
     ensure_scene_file(args)?;
 
     println!();
+    println!("Press 'q' or 'Ctrl+C' to stop safely.");
 
     let hash = hash_input(&args.input);
     let work_dir = args.input.with_file_name(format!(".{}", &hash[..7]));
@@ -557,8 +560,13 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let chunks = chunk::chunkify(&scenes);
 
     let enc_start = std::time::Instant::now();
-    encode::encode_all(&chunks, &inf, &args, &idx, &work_dir, grain_table.as_ref());
+    let completed = encode::encode_all(&chunks, &inf, &args, &idx, &work_dir, grain_table.as_ref());
     let enc_time = enc_start.elapsed();
+
+    if !completed {
+        eprintln!("\n{Y}Encoding aborted. Muxing skipped.{N}");
+        return Ok(());
+    }
 
     let video_mkv = work_dir.join("encode").join("video.mkv");
 
@@ -610,6 +618,7 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         crossterm::cursor::Show,
         crossterm::terminal::LeaveAlternateScreen
     );
+    let _ = crossterm::terminal::disable_raw_mode();
 
     let input_size = fs::metadata(&args.input)?.len();
     let output_size = fs::metadata(&args.output)?.len();
@@ -673,6 +682,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             crossterm::cursor::Show,
             crossterm::terminal::LeaveAlternateScreen
         );
+        let _ = crossterm::terminal::disable_raw_mode();
         eprintln!("{panic_info}");
         eprintln!("{}, FAIL", output.display());
     }));
@@ -686,6 +696,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Err(e) = main_with_args(&args) {
         let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+        let _ = crossterm::terminal::disable_raw_mode();
         eprintln!("{}, FAIL", args.output.display());
         return Err(e);
     }
