@@ -58,6 +58,7 @@ pub struct Args {
     pub target_quality: Option<String>,
     #[cfg(feature = "vship")]
     pub metric_mode: String,
+    pub vfr: bool,
     #[cfg(feature = "vship")]
     pub cvvdp_config: Option<String>,
 }
@@ -91,6 +92,7 @@ fn print_help() {
         println!("{C}-v {P}┃ {C}--vship    {W}Metric worker count");
         println!("{C}-d {P}┃ {C}--display  {W}Display JSON file for CVVDP. Screen name must be {R}xav_screen{W}");
     }
+    println!("{C}-vfr {P}┃ {C}--vfr          {W}Extract timestamps from MKV and apply to output (Variable Frame Rate)");
 
     println!();
     println!("{P}Example:{W}");
@@ -168,6 +170,7 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
     #[cfg(feature = "vship")]
     let mut metric_worker = 1;
     let mut chunk_buffer = None;
+    let mut vfr = false;
     #[cfg(feature = "vship")]
     let mut cvvdp_config = None;
 
@@ -250,6 +253,9 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
                     chunk_buffer = Some(args[i].parse()?);
                 }
             }
+            "--vfr" => {
+                vfr = true;
+            }
             #[cfg(feature = "vship")]
             "-d" | "--display" => {
                 i += 1;
@@ -295,6 +301,7 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
         chunk_buffer,
         #[cfg(feature = "vship")]
         metric_worker,
+        vfr,
         #[cfg(feature = "vship")]
         cvvdp_config,
     };
@@ -430,6 +437,25 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
 
     let video_mkv = work_dir.join("encode").join("video.mkv");
 
+    let timestamps_path = if args.vfr
+        && args.input.extension().unwrap_or_default().to_string_lossy().eq_ignore_ascii_case("mkv")
+    {
+        let ts_path = work_dir.join("timestamps.txt");
+        if !ts_path.exists() {
+            let _ = std::process::Command::new("mkvextract")
+                .arg(&args.input)
+                .arg("timestamps_v2")
+                .arg(format!("{}:{}", idx.track, ts_path.display()))
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+
+        if ts_path.exists() { Some(ts_path) } else { None }
+    } else {
+        None
+    };
+
     chunk::merge_out(
         &work_dir.join("encode"),
         if args.audio.is_some() && args.encoder == encoder::Encoder::SvtAv1 {
@@ -443,6 +469,7 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         } else {
             Some(&args.input)
         },
+        timestamps_path.as_deref(),
         args.encoder,
     )?;
 
