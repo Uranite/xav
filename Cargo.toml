@@ -23,6 +23,7 @@ use-vcpkg = []
 [dependencies]
 libc = "0.2.180"
 crossbeam-channel = "0.5.15"
+crossterm = "0.29"
 ffms2-sys = { version = "0.3.0", features = ["static"] }
 av-scenechange = { version = "0.21.0", default-features = false, features = ["ffms2", "asm", "nasm-rs", "cc", "libc"] }
 av1-grain = { version = "0.2.5", default-features = false, features = ["create"] }
