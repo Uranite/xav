@@ -70,8 +70,6 @@ fn make_svt_cmd(cfg: &EncConfig) -> Command {
         &fps_den_str,
         "--keyint",
         "0",
-        "--rc",
-        "0",
         "--scd",
         "0",
         "--progress",
