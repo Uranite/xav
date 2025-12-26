@@ -287,6 +287,7 @@ pub fn get_vidinf(idx: &Arc<VidIdx>) -> Result<VidInf, Box<dyn std::error::Error
 pub fn thr_vid_src(
     idx: &Arc<VidIdx>,
     threads: i32,
+    seek_mode: i32,
 ) -> Result<*mut FFMS_VideoSource, Box<dyn std::error::Error>> {
     unsafe {
         let source = CString::new(idx.path.as_str())?;
@@ -297,7 +298,7 @@ pub fn thr_vid_src(
             idx.track,
             idx.idx_handle,
             threads,
-            0,
+            seek_mode,
             std::ptr::addr_of_mut!(err),
         );
 
