@@ -44,6 +44,8 @@ pub struct Args {
     pub worker: usize,
     pub scene_file: PathBuf,
     pub params: String,
+    pub resume: bool,
+    pub resume_fast: bool,
     pub noise: Option<u32>,
     pub audio: Option<audio::AudioSpec>,
     pub input: PathBuf,
@@ -92,6 +94,8 @@ fn print_help() {
         println!("{C}-v {P}┃ {C}--vship    {W}Metric worker count");
         println!("{C}-d {P}┃ {C}--display  {W}Display JSON file for CVVDP. Screen name must be {R}xav_screen{W}");
     }
+    println!("{C}-r   {P}┃ {C}--resume       {W}Resume previous session");
+    println!("{C}-rf  {P}┃ {C}--resume-fast  {W}Resume with fast seeking (less safe but faster)");
     println!("{C}-vfr {P}┃ {C}--vfr          {W}Extract timestamps from MKV and apply to output (Variable Frame Rate)");
 
     println!();
@@ -122,10 +126,102 @@ fn print_help() {
 
 fn parse_args() -> Args {
     let args: Vec<String> = std::env::args().collect();
-    get_args(&args, true).unwrap_or_else(|_| {
+    let resume = args
+        .iter()
+        .any(|arg| arg == "-r" || arg == "--resume" || arg == "-rf" || arg == "--resume-fast");
+
+    let mut current = get_args(&args).unwrap_or_else(|_| {
         print_help();
         std::process::exit(1);
-    })
+    });
+
+    if resume {
+        if let Ok(saved) = get_saved_args(&current.input) {
+            current = merge_args(saved, current);
+        }
+    }
+
+    apply_defaults(&mut current);
+
+    if current.scene_file == PathBuf::new()
+        || current.input == PathBuf::new()
+        || current.output == PathBuf::new()
+    {
+        eprintln!("Missing args");
+        print_help();
+        std::process::exit(1);
+    }
+
+    current
+}
+
+fn merge_args(mut base: Args, over: Args) -> Args {
+    if over.worker != 0 {
+        base.worker = over.worker;
+    }
+    if over.scene_file != PathBuf::new() {
+        base.scene_file = over.scene_file;
+    }
+    if !over.params.is_empty() {
+        base.params = over.params;
+    }
+
+    base.resume = true;
+    if over.resume_fast {
+        base.resume_fast = true;
+    }
+
+    if over.noise.is_some() {
+        base.noise = over.noise;
+    }
+    if over.audio.is_some() {
+        base.audio = over.audio;
+    }
+    if over.input != PathBuf::new() {
+        base.input = over.input;
+    }
+    if over.output != PathBuf::new() {
+        base.output = over.output;
+    }
+    if over.crop.is_some() {
+        base.crop = over.crop;
+    }
+    if over.decode_strat.is_some() {
+        base.decode_strat = over.decode_strat;
+    }
+    #[cfg(feature = "vship")]
+    {
+        if over.qp_range.is_some() {
+            base.qp_range = over.qp_range;
+        }
+        if over.metric_worker != 0 {
+            base.metric_worker = over.metric_worker;
+        }
+        if over.target_quality.is_some() {
+            base.target_quality = over.target_quality;
+        }
+        if over.metric_mode != "mean" {
+            base.metric_mode = over.metric_mode;
+        }
+        if over.cvvdp_config.is_some() {
+            base.cvvdp_config = over.cvvdp_config;
+        }
+    }
+
+    base.resume = true;
+    if over.resume_fast {
+        base.resume_fast = true;
+    }
+
+    if over.chunk_buffer != 0 {
+        base.chunk_buffer = over.chunk_buffer;
+    }
+
+    if over.vfr {
+        base.vfr = true;
+    }
+
+    base
 }
 
 fn apply_defaults(args: &mut Args) {
@@ -148,7 +244,7 @@ fn apply_defaults(args: &mut Args) {
     }
 }
 
-fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::error::Error>> {
+fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
     if args.len() < 2 {
         return Err("Usage: xav [options] <input> <output>".into());
     }
@@ -162,6 +258,8 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
     #[cfg(feature = "vship")]
     let mut qp_range = None;
     let mut params = String::new();
+    let mut resume = false;
+    let mut resume_fast = false;
     let mut noise = None;
     let mut audio = None;
     let mut encoder = crate::encoder::Encoder::default();
@@ -223,6 +321,14 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
                     params.clone_from(&args[i]);
                 }
             }
+            "-r" | "--resume" => {
+                resume = true;
+            }
+            "-rf" | "--resume-fast" => {
+                resume = true;
+                resume_fast = true;
+            }
+
             "-n" | "--noise" => {
                 i += 1;
                 if i < args.len() {
@@ -276,13 +382,9 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
         i += 1;
     }
 
-    if allow_resume && let Ok(saved_args) = get_saved_args(&input) {
-        return Ok(saved_args);
-    }
-
     let chunk_buffer = worker + chunk_buffer.unwrap_or(0);
 
-    let mut result = Args {
+    let result = Args {
         encoder,
         worker,
         scene_file,
@@ -293,6 +395,8 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
         #[cfg(feature = "vship")]
         qp_range,
         params,
+        resume,
+        resume_fast,
         noise,
         audio,
         input,
@@ -306,15 +410,6 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
         cvvdp_config,
     };
 
-    apply_defaults(&mut result);
-
-    if result.scene_file == PathBuf::new()
-        || result.input == PathBuf::new()
-        || result.output == PathBuf::new()
-    {
-        return Err("Missing args".into());
-    }
-
     Ok(result)
 }
 
@@ -325,7 +420,10 @@ fn hash_input(path: &Path) -> String {
 }
 
 fn save_args(work_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let cmd: Vec<String> = std::env::args().collect();
+    let cmd: Vec<String> = std::env::args()
+        .filter(|arg| arg != "-r" && arg != "--resume" && arg != "-rf" && arg != "--resume-fast")
+        .collect();
+
     let quoted_cmd: Vec<String> = cmd
         .iter()
         .map(|arg| if arg.contains(' ') { format!("\"{arg}\"") } else { arg.clone() })
@@ -342,7 +440,7 @@ fn get_saved_args(input: &Path) -> Result<Args, Box<dyn std::error::Error>> {
     if cmd_path.exists() {
         let cmd_line = fs::read_to_string(cmd_path)?;
         let saved_args = parse_quoted_args(&cmd_line);
-        get_args(&saved_args, false)
+        get_args(&saved_args)
     } else {
         Err("No tmp dir found".into())
     }

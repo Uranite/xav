@@ -72,7 +72,11 @@ pub fn encode_all(
     work_dir: &Path,
     grain_table: Option<&PathBuf>,
 ) {
-    let resume_data = load_resume_data(work_dir);
+    let resume_data = if args.resume {
+        load_resume_data(work_dir)
+    } else {
+        crate::chunk::ResumeInf { chnks_done: Vec::new() }
+    };
 
     #[cfg(feature = "vship")]
     {
@@ -111,8 +115,18 @@ pub fn encode_all(
         let idx = Arc::clone(idx);
         let inf = inf.clone();
         let sem = Arc::clone(&sem);
+        let seek_mode = if args.resume_fast { 1 } else { 0 };
         thread::spawn(move || {
-            decode_chunks(&chunks, &idx, &inf, &tx, &skip_indices, strat, &sem);
+            decode_chunks(
+                &chunks,
+                &idx,
+                &inf,
+                &tx,
+                &skip_indices,
+                strat,
+                &sem,
+                seek_mode,
+            );
         })
     };
 
@@ -426,6 +440,7 @@ fn encode_tq(
         let enc_tx = enc_tx.clone();
         let permits_decoder = Arc::clone(&permits);
         let permits_done = Arc::clone(&permits);
+        let seek_mode = if args.resume_fast { 1 } else { 0 };
 
         thread::spawn(move || {
             let (decode_tx, decode_rx) = bounded::<crate::worker::WorkPkg>(2);
@@ -440,6 +455,7 @@ fn encode_tq(
                     &skip_indices,
                     strat,
                     &permits_decoder,
+                    seek_mode,
                 );
             });
 
