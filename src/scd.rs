@@ -17,6 +17,7 @@ pub fn fd_scenes(
     let idx = ffms::VidIdx::new(vid_path, true)?;
     let inf = ffms::get_vidinf(&idx)?;
 
+    let min_dist = (inf.fps_num + inf.fps_den / 2) / inf.fps_den;
     let max_dist = ((inf.fps_num * 10 + inf.fps_den / 2) / inf.fps_den).min(300);
     let tot_frames = inf.frames;
     drop(idx);
@@ -27,7 +28,7 @@ pub fn fd_scenes(
     let opts = DetectionOptions {
         analysis_speed: SceneDetectionSpeed::Standard,
         detect_flashes: true,
-        min_scenecut_distance: None,
+        min_scenecut_distance: Some(min_dist as usize),
         max_scenecut_distance: None,
         lookahead_distance: 5,
     };
