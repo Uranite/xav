@@ -154,6 +154,7 @@ pub fn merge_out(
     output: &Path,
     inf: &crate::ffms::VidInf,
     input: Option<&Path>,
+    timestamps: Option<&Path>,
     encoder: Encoder,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut files: Vec<_> = fs::read_dir(encode_dir)?
@@ -183,6 +184,7 @@ pub fn merge_out(
             output,
             inf,
             input,
+            timestamps,
         );
     }
 
@@ -194,12 +196,18 @@ pub fn merge_out(
         .enumerate()
         .map(|(i, chunk)| {
             let path = temp_dir.join(format!("batch_{i}.ivf"));
-            run_merge(&chunk.iter().map(fs::DirEntry::path).collect::<Vec<_>>(), &path, inf, None)?;
+            run_merge(
+                &chunk.iter().map(fs::DirEntry::path).collect::<Vec<_>>(),
+                &path,
+                inf,
+                None,
+                None,
+            )?;
             Ok(path)
         })
         .collect::<Result<_, Box<dyn std::error::Error>>>()?;
 
-    run_merge(&batches, output, inf, input)?;
+    run_merge(&batches, output, inf, input, timestamps)?;
     fs::remove_dir_all(&temp_dir)?;
     Ok(())
 }
@@ -209,12 +217,17 @@ fn run_merge(
     output: &Path,
     inf: &crate::ffms::VidInf,
     input: Option<&Path>,
+    timestamps: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = Command::new("mkvmerge");
     cmd.arg("-q").arg("-o").arg(output).arg("-B").arg("-T");
 
     if input.is_none() {
         cmd.arg("-A");
+    }
+
+    if let Some(ts_path) = timestamps {
+        cmd.arg("--timestamps").arg(format!("0:{}", ts_path.display()));
     }
 
     cmd.arg("--no-global-tags")
