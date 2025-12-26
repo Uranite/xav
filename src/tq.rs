@@ -78,7 +78,7 @@ macro_rules! calc_metrics_impl {
             let idx = crate::ffms::VidIdx::new(probe_path, false).unwrap();
             let threads =
                 std::thread::available_parallelism().map_or(8, |n| n.get().try_into().unwrap_or(8));
-            let src = crate::ffms::thr_vid_src(&idx, threads).unwrap();
+            let src = crate::ffms::thr_vid_src(&idx, threads, 0).unwrap();
 
             let mut scores = Vec::with_capacity(pkg.frame_count);
             let frame_size = pipe.frame_size;

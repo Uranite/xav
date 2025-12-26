@@ -92,12 +92,13 @@ fn test_roundtrip(filename: &str, crop: (u32, u32)) {
             &HashSet::new(),
             decode_strat,
             &sem_c,
+            0,
         );
     });
 
     let pkg = rx.recv().unwrap();
     let frame_size = pkg.yuv.len() / pkg.frame_count;
-    let Ok(source) = thr_vid_src(&idx, 1) else {
+    let Ok(source) = thr_vid_src(&idx, 1, 0) else {
         panic!("Failed to create video source");
     };
 
