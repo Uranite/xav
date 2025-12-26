@@ -50,6 +50,7 @@ pub struct Args {
     pub audio: Option<audio::AudioSpec>,
     pub input: PathBuf,
     pub output: PathBuf,
+    pub crop: Option<String>,
     pub decode_strat: Option<ffms::DecodeStrat>,
     pub chunk_buffer: usize,
     #[cfg(feature = "vship")]
@@ -94,6 +95,7 @@ fn print_help() {
         println!("{C}-v {P}┃ {C}--vship    {W}Metric worker count");
         println!("{C}-d {P}┃ {C}--display  {W}Display JSON file for CVVDP. Screen name must be {R}xav_screen{W}");
     }
+    println!("{C}-c   {P}┃ {C}--crop         {W}Crop: `20` (all), `20,10` (vert,horz), `132,132,0,0` (t,b,l,r)");
     println!("{C}-r   {P}┃ {C}--resume       {W}Resume previous session");
     println!("{C}-rf  {P}┃ {C}--resume-fast  {W}Resume with fast seeking (less safe but faster)");
     println!("{C}-vfr {P}┃ {C}--vfr          {W}Extract timestamps from MKV and apply to output (Variable Frame Rate)");
@@ -261,6 +263,7 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
     let mut resume = false;
     let mut resume_fast = false;
     let mut noise = None;
+    let mut crop = None;
     let mut audio = None;
     let mut encoder = crate::encoder::Encoder::default();
     let mut input = PathBuf::new();
@@ -339,6 +342,12 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
                     noise = Some(val * 100);
                 }
             }
+            "-c" | "--crop" => {
+                i += 1;
+                if i < args.len() {
+                    crop = Some(args[i].clone());
+                }
+            }
             "-a" | "--audio" => {
                 i += 1;
                 if i < args.len() {
@@ -398,6 +407,7 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
         resume,
         resume_fast,
         noise,
+        crop,
         audio,
         input,
         output,
@@ -505,7 +515,18 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut args = args.clone();
 
-    let crop = {
+    let crop = if let Some(ref crop_str) = args.crop {
+        let parts: Result<Vec<u32>, _> = crop_str.split(',').map(|s| s.trim().parse()).collect();
+        match parts {
+            Ok(parts) => match parts.len() {
+                1 => (parts[0], parts[0]),
+                2 => (parts[0], parts[1]),
+                4 => (parts[0].min(parts[1]), parts[2].min(parts[3])),
+                _ => return Err("Invalid crop format: expected 1, 2, or 4 values".into()),
+            },
+            Err(_) => return Err("Invalid crop values".into()),
+        }
+    } else {
         let config = crop::CropDetectConfig { sample_count: 13, min_black_pixels: 2 };
 
         match crop::detect_crop(&idx, &inf, &config) {
