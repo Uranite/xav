@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::interp::{akima, fritsch_carlson, lerp, pchip};
 
 pub const JOD_A: f64 = 0.043_956_939_131_021_5;
@@ -11,21 +13,28 @@ pub fn jod(q: f64) -> f64 {
     JOD_A.mul_add(-q.powf(JOD_EXP), 10.0)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Probe {
     pub crf: f64,
     pub score: f64,
     pub frame_scores: Vec<f64>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ProbeLog {
+    #[serde(rename = "id")]
     pub chunk_idx: usize,
+    #[serde(rename = "p")]
     pub probes: Vec<(f64, f64, u64)>,
+    #[serde(rename = "fc")]
     pub final_crf: f64,
+    #[serde(rename = "fs")]
     pub final_score: f64,
+    #[serde(rename = "fz")]
     pub final_size: u64,
+    #[serde(rename = "r")]
     pub round: usize,
+    #[serde(rename = "f")]
     pub frames: usize,
 }
 
