@@ -466,6 +466,17 @@ fn run_metrics_worker(
 }
 
 #[cfg(feature = "vship")]
+fn load_existing_tq_logs(work_dir: &Path) -> Vec<crate::tq::ProbeLog> {
+    let chunks_path = work_dir.join("chunks.json");
+    if !chunks_path.exists() {
+        return Vec::new();
+    }
+
+    let content = std::fs::read_to_string(chunks_path).unwrap_or_default();
+    content.lines().filter_map(|line| sonic_rs::from_str(line).ok()).collect()
+}
+
+#[cfg(feature = "vship")]
 fn encode_tq(
     chunks: &[Chunk],
     inf: &VidInf,
@@ -572,7 +583,19 @@ fn encode_tq(
     };
 
     let resume_state = Arc::new(std::sync::Mutex::new(resume_data.clone()));
-    let tq_logger = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let existing_logs = load_existing_tq_logs(work_dir);
+    if !existing_logs.is_empty() {
+        let metric_name = if tq_ctx.use_butteraugli {
+            "butteraugli"
+        } else if tq_ctx.use_cvvdp {
+            "cvvdp"
+        } else {
+            "ssimulacra2"
+        };
+        write_tq_log(&args.input, inf, metric_name, &existing_logs);
+    }
+    let tq_logger = Arc::new(std::sync::Mutex::new(existing_logs));
+
     let stats = Some(create_stats(completed_count, resume_data));
     let prog = Arc::new(ProgsTrack::new(
         chunks,
