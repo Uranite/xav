@@ -183,7 +183,13 @@ pub fn merge_out(
             &files.iter().map(fs::DirEntry::path).collect::<Vec<_>>(),
             output,
             inf,
-            input,
+            if let Some(path) = input
+                && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("y4m"))
+            {
+                None
+            } else {
+                input
+            },
             timestamps,
         );
     }
