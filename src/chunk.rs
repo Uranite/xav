@@ -144,6 +144,11 @@ fn concat_ivf(
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+const BATCH_SIZE: usize = usize::MAX;
+#[cfg(not(target_os = "windows"))]
+const BATCH_SIZE: usize = 960;
+
 pub fn merge_out(
     encode_dir: &Path,
     output: &Path,
@@ -173,7 +178,7 @@ pub fn merge_out(
         );
     }
 
-    if files.len() <= 960 {
+    if files.len() <= BATCH_SIZE {
         return run_merge(
             &files.iter().map(fs::DirEntry::path).collect::<Vec<_>>(),
             output,
@@ -193,7 +198,7 @@ pub fn merge_out(
     fs::create_dir_all(&temp_dir)?;
 
     let batches: Vec<_> = files
-        .chunks(960)
+        .chunks(BATCH_SIZE)
         .enumerate()
         .map(|(i, chunk)| {
             let path = temp_dir.join(format!("batch_{i}.ivf"));
@@ -221,41 +226,77 @@ fn run_merge(
     timestamps: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = Command::new("mkvmerge");
-    cmd.arg("-q").arg("-o").arg(output).arg("-B").arg("-T");
+    let mut args = vec![
+        "-q".to_string(),
+        "-o".to_string(),
+        output.to_string_lossy().into_owned(),
+        "-B".to_string(),
+        "-T".to_string(),
+    ];
 
     if input.is_none() {
-        cmd.arg("-A");
+        args.push("-A".to_string());
     }
 
     if let Some(ts_path) = timestamps {
-        cmd.arg("--timestamps").arg(format!("0:{}", ts_path.display()));
+        args.push("--timestamps".to_string());
+        args.push(format!("0:{}", ts_path.display()));
     }
 
-    cmd.arg("--no-global-tags")
-        .arg("--no-date")
-        .arg("--disable-language-ietf")
-        .arg("--disable-track-statistics-tags");
+    args.extend([
+        "--no-global-tags".to_string(),
+        "--no-date".to_string(),
+        "--disable-language-ietf".to_string(),
+        "--disable-track-statistics-tags".to_string(),
+    ]);
 
     for (i, file) in files.iter().enumerate() {
-        if i == 0 {
-            cmd.arg(file);
-        } else {
-            cmd.arg("+").arg(file);
+        if i != 0 {
+            args.push("+".to_string());
         }
+        args.push(file.to_string_lossy().into_owned());
     }
 
     if let (Some(dw), Some(dh)) = (inf.display_width, inf.display_height)
         && (dw != inf.width || dh != inf.height)
     {
-        cmd.arg("--aspect-ratio").arg(format!("0:{dw}/{dh}"));
+        args.push("--aspect-ratio".to_string());
+        args.push(format!("0:{dw}/{dh}"));
     }
 
-    cmd.arg("--default-duration").arg(format!("0:{}/{}fps", inf.fps_num, inf.fps_den));
+    args.push("--default-duration".to_string());
+    args.push(format!("0:{}/{}fps", inf.fps_num, inf.fps_den));
 
     if let Some(input) = input {
-        cmd.arg("-D").arg(input);
+        args.push("-D".to_string());
+        args.push(input.to_string_lossy().into_owned());
     }
 
-    cmd.status()?;
+    if cfg!(target_os = "windows") {
+        let json_args = sonic_rs::to_string(&args)?;
+        let opts_file = output.with_file_name(format!(
+            "{}.opts.json",
+            output.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        fs::write(&opts_file, json_args)?;
+
+        cmd.arg(format!("@{}", opts_file.display()));
+
+        // eprintln!("\nOptions file: {}", opts_file.display());
+        let status = cmd.status();
+
+        let _ = fs::remove_file(&opts_file);
+
+        if !status?.success() {
+            return Err("Muxing failed".into());
+        }
+    } else {
+        cmd.args(args);
+        // eprintln!("\nRunning mkvmerge: {:?}", cmd);
+        let status = cmd.status()?;
+        if !status.success() {
+            return Err("Muxing failed".into());
+        }
+    }
     Ok(())
 }
