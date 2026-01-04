@@ -69,9 +69,9 @@ extern "C" fn restore() {
     let _ = crossterm::execute!(
         std::io::stdout(),
         crossterm::cursor::Show,
-        crossterm::terminal::LeaveAlternateScreen
+        // crossterm::terminal::LeaveAlternateScreen
     );
-    let _ = crossterm::terminal::disable_raw_mode();
+    // let _ = crossterm::terminal::disable_raw_mode();
 }
 extern "C" fn exit_restore(_: i32) {
     restore();
@@ -492,13 +492,13 @@ fn ensure_scene_file(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
-    let _ = crossterm::execute!(
-        std::io::stdout(),
-        crossterm::terminal::EnterAlternateScreen,
-        crossterm::cursor::MoveTo(0, 0),
-        crossterm::cursor::Hide
-    );
-    let _ = crossterm::terminal::enable_raw_mode();
+    // let _ = crossterm::execute!(
+    //     std::io::stdout(),
+    //     crossterm::terminal::EnterAlternateScreen,
+    //     crossterm::cursor::MoveTo(0, 0),
+    //     crossterm::cursor::Hide
+    // );
+    // let _ = crossterm::terminal::enable_raw_mode();
 
     ensure_scene_file(args)?;
 
@@ -616,9 +616,9 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let _ = crossterm::execute!(
         std::io::stdout(),
         crossterm::cursor::Show,
-        crossterm::terminal::LeaveAlternateScreen
+        // crossterm::terminal::LeaveAlternateScreen
     );
-    let _ = crossterm::terminal::disable_raw_mode();
+    // let _ = crossterm::terminal::disable_raw_mode();
 
     let input_size = fs::metadata(&args.input)?.len();
     let output_size = fs::metadata(&args.output)?.len();
@@ -680,9 +680,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = crossterm::execute!(
             std::io::stdout(),
             crossterm::cursor::Show,
-            crossterm::terminal::LeaveAlternateScreen
+            // crossterm::terminal::LeaveAlternateScreen
         );
-        let _ = crossterm::terminal::disable_raw_mode();
+        // let _ = crossterm::terminal::disable_raw_mode();
         eprintln!("{panic_info}");
         eprintln!("{}, FAIL", output.display());
     }));
@@ -695,8 +695,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Err(e) = main_with_args(&args) {
-        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
-        let _ = crossterm::terminal::disable_raw_mode();
+        // let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+        // let _ = crossterm::terminal::disable_raw_mode();
         eprintln!("{}, FAIL", args.output.display());
         return Err(e);
     }
