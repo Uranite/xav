@@ -173,13 +173,38 @@ pub fn merge_out(
         );
     }
 
-    run_merge(
-        &files.iter().map(fs::DirEntry::path).collect::<Vec<_>>(),
-        output,
-        inf,
-        input,
-        timestamps,
-    )
+    if files.len() <= 960 {
+        return run_merge(
+            &files.iter().map(fs::DirEntry::path).collect::<Vec<_>>(),
+            output,
+            inf,
+            input,
+            timestamps,
+        );
+    }
+
+    let temp_dir = encode_dir.join("temp_merge");
+    fs::create_dir_all(&temp_dir)?;
+
+    let batches: Vec<_> = files
+        .chunks(960)
+        .enumerate()
+        .map(|(i, chunk)| {
+            let path = temp_dir.join(format!("batch_{i}.ivf"));
+            run_merge(
+                &chunk.iter().map(fs::DirEntry::path).collect::<Vec<_>>(),
+                &path,
+                inf,
+                None,
+                None,
+            )?;
+            Ok(path)
+        })
+        .collect::<Result<_, Box<dyn std::error::Error>>>()?;
+
+    run_merge(&batches, output, inf, input, timestamps)?;
+    fs::remove_dir_all(&temp_dir)?;
+    Ok(())
 }
 
 fn run_merge(
