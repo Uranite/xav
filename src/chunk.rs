@@ -250,13 +250,6 @@ fn run_merge(
         "--disable-track-statistics-tags".to_string(),
     ]);
 
-    for (i, file) in files.iter().enumerate() {
-        if i != 0 {
-            args.push("+".to_string());
-        }
-        args.push(file.to_string_lossy().into_owned());
-    }
-
     if let (Some(dw), Some(dh)) = (inf.display_width, inf.display_height)
         && (dw != inf.width || dh != inf.height)
     {
@@ -266,6 +259,13 @@ fn run_merge(
 
     args.push("--default-duration".to_string());
     args.push(format!("0:{}/{}fps", inf.fps_num, inf.fps_den));
+
+    for (i, file) in files.iter().enumerate() {
+        if i != 0 {
+            args.push("+".to_string());
+        }
+        args.push(file.to_string_lossy().into_owned());
+    }
 
     if let Some(input) = input {
         args.push("-D".to_string());
