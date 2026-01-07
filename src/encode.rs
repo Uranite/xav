@@ -486,7 +486,11 @@ fn encode_tq(
     grain_table: Option<&PathBuf>,
     shutdown: &Arc<std::sync::atomic::AtomicBool>,
 ) {
-    let resume_data = load_resume_data(work_dir);
+    let resume_data = if args.resume {
+        load_resume_data(work_dir)
+    } else {
+        crate::chunk::ResumeInf { chnks_done: Vec::new() }
+    };
     let (skip_indices, completed_count, completed_frames) = build_skip_set(&resume_data);
 
     let tq_str = args.target_quality.as_ref().unwrap();
@@ -583,7 +587,7 @@ fn encode_tq(
     };
 
     let resume_state = Arc::new(std::sync::Mutex::new(resume_data.clone()));
-    let existing_logs = load_existing_tq_logs(work_dir);
+    let existing_logs = if args.resume { load_existing_tq_logs(work_dir) } else { Vec::new() };
     if !existing_logs.is_empty() {
         let metric_name = if tq_ctx.use_butteraugli {
             "butteraugli"
