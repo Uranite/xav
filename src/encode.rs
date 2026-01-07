@@ -105,9 +105,16 @@ pub fn encode_all(
                                 if let Some(mutex) = RUNNING_CHILDREN.get() {
                                     let mut pids = mutex.lock().unwrap();
                                     for pid in pids.drain() {
-                                        let _ = std::process::Command::new("taskkill")
-                                            .args(["/F", "/PID", &pid.to_string()])
-                                            .output();
+                                        #[cfg(target_os = "windows")]
+                                        {
+                                            let _ = std::process::Command::new("taskkill")
+                                                .args(["/F", "/PID", &pid.to_string()])
+                                                .output();
+                                        }
+                                        #[cfg(not(target_os = "windows"))]
+                                        unsafe {
+                                            libc::kill(pid as i32, libc::SIGKILL);
+                                        }
                                     }
                                 }
                                 std::process::exit(130);
