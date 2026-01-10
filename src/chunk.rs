@@ -156,6 +156,7 @@ pub fn merge_out(
     input: Option<&Path>,
     timestamps: Option<&Path>,
     encoder: Encoder,
+    keep: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut files: Vec<_> = fs::read_dir(encode_dir)?
         .filter_map(Result::ok)
@@ -214,7 +215,9 @@ pub fn merge_out(
         .collect::<Result<_, Box<dyn std::error::Error>>>()?;
 
     run_merge(&batches, output, inf, input, timestamps)?;
-    fs::remove_dir_all(&temp_dir)?;
+    if !keep {
+        fs::remove_dir_all(&temp_dir)?;
+    }
     Ok(())
 }
 

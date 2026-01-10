@@ -63,6 +63,7 @@ pub struct Args {
     pub vfr: bool,
     #[cfg(feature = "vship")]
     pub cvvdp_config: Option<String>,
+    pub keep: bool,
 }
 
 extern "C" fn restore() {
@@ -101,6 +102,7 @@ fn print_help() {
     println!("{C}-c   {P}┃ {C}--crop         {W}Crop: `20` (all), `20,10` (vert,horz), `132,132,0,0` (t,b,l,r)");
     println!("{C}-r   {P}┃ {C}--resume       {W}Resume previous session");
     println!("{C}-rf  {P}┃ {C}--resume-fast  {W}Resume with fast seeking (less safe but faster)");
+    println!("{C}-k   {P}┃ {C}--keep         {W}Keep temporary files and folders after encoding");
     println!("{C}-vfr {P}┃ {C}--vfr          {W}Extract timestamps from MKV and apply to output (Variable Frame Rate)");
 
     println!();
@@ -226,6 +228,10 @@ fn merge_args(mut base: Args, over: Args) -> Args {
         base.vfr = true;
     }
 
+    if over.keep {
+        base.keep = true;
+    }
+
     base
 }
 
@@ -277,6 +283,7 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
     let mut vfr = false;
     #[cfg(feature = "vship")]
     let mut cvvdp_config = None;
+    let mut keep = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -374,6 +381,9 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
             "--vfr" => {
                 vfr = true;
             }
+            "-k" | "--keep" => {
+                keep = true;
+            }
             #[cfg(feature = "vship")]
             "-d" | "--display" => {
                 i += 1;
@@ -421,6 +431,7 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
         vfr,
         #[cfg(feature = "vship")]
         cvvdp_config,
+        keep,
     };
 
     Ok(result)
@@ -604,13 +615,16 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         },
         timestamps_path.as_deref(),
         args.encoder,
+        args.keep,
     )?;
 
     if let Some(ref audio_spec) = args.audio
         && args.encoder == encoder::Encoder::SvtAv1
     {
         audio::process_audio(audio_spec, &args.input, &video_mkv, &args.output)?;
-        fs::remove_file(&video_mkv)?;
+        if !args.keep {
+            fs::remove_file(&video_mkv)?;
+        }
     }
 
     let _ = crossterm::execute!(
@@ -667,7 +681,9 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     eh, em, es, enc_speed, ""
 );
 
-    fs::remove_dir_all(&work_dir)?;
+    if !args.keep {
+        fs::remove_dir_all(&work_dir)?;
+    }
 
     Ok(())
 }
