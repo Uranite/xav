@@ -15,9 +15,13 @@ categories = ["multimedia::video", "command-line-utilities"]
 default = [ "vship" ]
 vship = []
 svt-essential = []
+nvidia = []
+amd = []
+vcpkg = []
 
 [build-dependencies]
 nasm-rs = { version = "0.3.2", features = ["parallel"] }
+vcpkg = "0.2"
 
 [profile.release]
 opt-level = 3
