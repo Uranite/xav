@@ -1,0 +1,184 @@
+name: Rust
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+concurrency:
+  group: xav
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Build on Windows
+    runs-on: windows-latest
+
+    env:
+      CC: clang
+      CXX: clang++
+      FFMS_LIB_DIR: ${{ github.workspace }}\ffms2\lib
+      FFMS_INCLUDE_DIR: ${{ github.workspace }}\ffms2\include
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Download and extract deps
+        run: |
+          curl -L -o lib.7z "https://github.com/Uranite/xav/releases/download/deps/lib.7z"
+          curl -L -o ffmpeg.7z "https://github.com/Uranite/xav/releases/download/deps/ffmpeg.7z"
+          7z x lib.7z
+          7z x ffmpeg.7z
+
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache Rust deps
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build (No TQ)
+        run: |
+          cargo ci-b-static-notq
+
+      - name: Package (No TQ)
+        shell: pwsh
+        run: |
+          Push-Location target/release
+          7z a -mx9 xav-notq.7z xav.exe
+
+      - name: Upload Executable (No TQ)
+        uses: actions/upload-artifact@v5
+        with:
+          name: xav-notq-win
+          path: target/release/xav-notq.7z
+
+      - name: Build (Vulkan)
+        run: |
+          cp lib/vship/vulkan/libvship.lib lib/
+          cargo ci-b-static-vulkan
+
+      - name: Package (Vulkan)
+        shell: pwsh
+        run: |
+          Push-Location target/release
+          7z a -mx9 xav-vulkan.7z xav.exe
+
+      - name: Upload Executable (Vulkan)
+        uses: actions/upload-artifact@v5
+        with:
+          name: xav-vulkan-win
+          path: target/release/xav-vulkan.7z
+
+      - name: Build (NVIDIA)
+        run: |
+          cp lib/vship/cuda/libvship.lib lib/
+          cargo ci-b-static-nvidia
+
+      - name: Package (NVIDIA)
+        shell: pwsh
+        run: |
+          Push-Location target/release
+          7z a -mx9 xav-nvidia.7z xav.exe
+      
+      - name: Upload Executable (NVIDIA)
+        uses: actions/upload-artifact@v5
+        with:
+          name: xav-nvidia-win
+          path: target/release/xav-nvidia.7z
+
+      - name: Build (AMD)
+        run: |
+          cp lib/vship/hip/libvship.lib lib/
+          cargo ci-b-static-amd
+
+      - name: Package (AMD)
+        shell: pwsh
+        run: |
+          Push-Location target/release
+          7z a -mx9 xav-amd.7z xav.exe
+      
+      - name: Upload Executable (AMD)
+        uses: actions/upload-artifact@v5
+        with:
+          name: xav-amd-win
+          path: target/release/xav-amd.7z
+
+  release:
+    name: Update Latest Release
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+
+      - name: Download No TQ artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: xav-notq-win
+
+      - name: Download Vulkan artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: xav-vulkan-win
+
+      - name: Download NVIDIA artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: xav-nvidia-win
+
+      - name: Download AMD artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: xav-amd-win
+
+      - name: Delete old release
+        uses: dev-drprasad/delete-tag-and-release@v1.1
+        with:
+          delete_release: true
+          tag_name: latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Latest Release
+        uses: softprops/action-gh-release@v2.5.0
+        with:
+          tag_name: latest
+          target_commitish: ${{ github.sha }}
+          files: |
+            xav-notq.7z
+            xav-vulkan.7z
+            xav-nvidia.7z
+            xav-amd.7z
+          name: Latest Build
+          body: |
+            Automated build from commit ${{ github.sha }}
+            Built on: ${{ github.event.head_commit.timestamp }}
+
+            Requires SvtAv1EncApp, ffmpeg, and ffprobe.
+            Optionally: mkvmerge and mp4box.
+
+            ----------------------------------------
+            Available Builds
+            ----------------------------------------
+
+            xav-notq.7z
+              - Standard build without Target Quality (TQ).
+              - NVIDIA/AMD GPUs are not required.
+              - You can still use chunked encoding without a dedicated GPU.
+
+            xav-nvidia.7z
+              - NVIDIA-specific build.
+              - Required only for the Target Quality (TQ) feature on NVIDIA GPUs.
+              - Not required for chunked encoding.
+
+            xav-amd.7z
+              - AMD-specific build.
+              - Required only for the Target Quality (TQ) feature on AMD GPUs.
+              - If you have an older AMD GPU that is not supported here
+                but it supports Vulkan 1.3, try the Vulkan build instead.
+
+            xav-vulkan.7z
+              - May work on Intel GPUs on Windows. If it does not work, the issue is most likely GPU driver related.
+              - Try it if:
+                * Your NVIDIA/AMD GPU is not supported by the dedicated build (too old?)
+                * Your GPU supports Vulkan 1.3
