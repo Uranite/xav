@@ -15,6 +15,9 @@ categories = ["multimedia::video", "command-line-utilities"]
 default = [ "vship" ]
 static = []
 vship = []
+nvidia = []
+amd = []
+vcpkg = []
 
 [dependencies]
 libc = "0.2.185"
@@ -24,6 +27,12 @@ ebur128 = "0.1.10"
 sonic-rs = "0.5.8"
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"
+
+[patch.crates-io]
+av-decoders = { git = "https://github.com/rust-av/av-decoders" }
+
+[build-dependencies]
+vcpkg = "0.2"
 
 [profile.release]
 opt-level = 3
