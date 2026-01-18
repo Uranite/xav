@@ -1,20 +1,72 @@
-[env]
-RUSTFLAGS = "-C debuginfo=0 -C target-cpu=native -C opt-level=3 -C codegen-units=1 -C strip=symbols -C panic=abort -C linker=clang -C lto=fat -C embed-bitcode=yes -Z dylib-lto -Z panic_abort_tests -C link-args=-fPIC,-fuse-ld=lld,-Wl,-O3,-Wl,--lto-O3,-Wl,--as-needed,-Wl,--gc-sections,-Wl,--icf=safe,-Wl,-z,norelro,-Wl,--build-id=none,-Wl,--no-eh-frame-hdr,-Wl,--relax,-Wl,-z,noseparate-code,-Wl,-znow,-Wl,--discard-all,-Wl,--strip-all,-lffms2,-lvship"
+[alias]
+b-static-nvidia = [
+    "build",
+    "--release",
+    "--features", "static,vship,nvidia,vcpkg",
+    "--config", 
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+]
 
-[build]
-rustflags = [
-    "-C", "debuginfo=0",
-    "-C", "target-cpu=native",
-    "-C", "opt-level=3",
-    "-C", "codegen-units=1",
-    "-C", "strip=symbols",
-    "-C", "panic=abort",
-    "-C", "linker=clang",
-    "-C", "lto=fat",
-    "-C", "embed-bitcode=yes",
-    "-C", "link-args=-fPIC -fuse-ld=lld -Wl,-O3 -Wl,--lto-O3 -Wl,--as-needed -Wl,--gc-sections -Wl,--icf=safe -Wl,-z,norelro -Wl,--build-id=none -Wl,--no-eh-frame-hdr -Wl,--relax -Wl,-z,noseparate-code -Wl,-znow -Wl,--discard-all -Wl,--strip-all",
-    "-Z", "dylib-lto",
-    "-Z", "panic_abort_tests",
-    "-lffms2",
-    "-lvship",
+b-static-lib-nvidia = [
+    "build",
+    "--release",
+    "--features", "static,vship,nvidia,vcpkg,libsvtav1",
+    "--config", 
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+]
+
+r-static-nvidia = [
+    "run",
+    "--release",
+    "--features", "static,vship,nvidia,vcpkg",
+    "--config", 
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+]
+
+b-static-amd = [
+    "build",
+    "--release",
+    "--features", "static,vship,amd,vcpkg",
+    "--config", 
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+]
+
+b-termux = [
+    "build",
+    "--release",
+    "--config", 
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'embed-bitcode=yes']"
+]
+
+b-linux = [
+    "install",
+    "--path",
+    ".",
+    "--features", "vship",
+    "--config",
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests']"
+]
+
+ci-b-static-nvidia = [
+    "build",
+    "--release",
+    "--features", "static,vship,nvidia",
+    "--config", 
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+]
+
+ci-b-static-amd = [
+    "build",
+    "--release",
+    "--features", "static,vship,amd",
+    "--config", 
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+]
+
+ci-b-static-notq = [
+    "build",
+    "--release",
+    "--features", "static",
+    "--config", 
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
 ]
