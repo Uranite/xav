@@ -15,6 +15,9 @@ categories = ["multimedia::video", "command-line-utilities"]
 default = [ "vship" ]
 static = []
 vship = []
+nvidia = []
+amd = []
+vcpkg = []
 
 [dependencies]
 libc = "0.2.186"
@@ -27,6 +30,7 @@ av-scenechange = { git = "https://github.com/emrakyz/av-scenechange" }
 
 [build-dependencies]
 nasm-rs = { version = "0.3.2", features = ["parallel"] }
+vcpkg = "0.2"
 
 [profile.release]
 opt-level = 3
