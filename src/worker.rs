@@ -54,12 +54,21 @@ impl Semaphore {
         Self { state: Mutex::new(permits), cvar: Condvar::new() }
     }
 
-    pub fn acquire(&self) {
+    pub fn acquire_interruptible(&self, shutdown: &std::sync::atomic::AtomicBool) -> bool {
         let mut count = self.state.lock().unwrap();
-        while *count == 0 {
-            count = self.cvar.wait(count).unwrap();
+        loop {
+            if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+                return false;
+            }
+            if *count > 0 {
+                *count -= 1;
+                return true;
+            }
+            // Use wait_timeout to periodically check the shutdown flag
+            let (new_count, _) =
+                self.cvar.wait_timeout(count, std::time::Duration::from_millis(100)).unwrap();
+            count = new_count;
         }
-        *count -= 1;
     }
 
     pub fn release(&self) {

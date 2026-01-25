@@ -292,6 +292,7 @@ pub fn merge_out(
     input: Option<&Path>,
     encoder: Encoder,
     ranges: Option<&[(usize, usize)]>,
+    keep: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut files: Vec<_> = fs::read_dir(encode_dir)?
         .filter_map(Result::ok)
@@ -377,7 +378,9 @@ pub fn merge_out(
         .collect::<Result<_, Box<dyn std::error::Error>>>()?;
 
     run_merge(&batches, output, inf, input, ranges)?;
-    fs::remove_dir_all(&temp_dir)?;
+    if !keep {
+        fs::remove_dir_all(&temp_dir)?;
+    }
     Ok(())
 }
 
@@ -560,25 +563,34 @@ pub fn translate_scenes(scenes: &[Scene], ranges: &[(usize, usize)]) -> Vec<Scen
 }
 
 fn extract_segment(input: &Path, output: &Path, start: Option<f64>, duration: Option<f64>) -> bool {
-    let mut cmd = Command::new("ffmpeg");
-    cmd.args(["-loglevel", "quiet", "-hide_banner", "-nostdin", "-y"]);
+    let run_ffmpeg = |args: &[&str]| {
+        let mut cmd = Command::new("ffmpeg");
+        cmd.args(["-loglevel", "quiet", "-hide_banner", "-nostdin", "-y"]);
 
-    if let Some(s) = start {
-        cmd.args(["-ss", &format!("{s:.6}")]);
+        if let Some(s) = start {
+            cmd.args(["-ss", &format!("{s:.6}")]);
+        }
+        if let Some(d) = duration {
+            cmd.args(["-t", &format!("{d:.6}")]);
+        }
+
+        cmd.arg("-i")
+            .arg(input)
+            .args(["-vn", "-sn", "-dn", "-map", "0:a", "-c", "copy"])
+            .args(["-map_chapters", "-1"])
+            .args(FF_FLAGS)
+            .arg(output);
+
+        let _ = cmd.status();
+        output.exists() && fs::metadata(output).is_ok_and(|m| m.len() > 0)
+    };
+
+    if run_ffmpeg(&["-c", "copy"]) {
+        return true;
     }
-    if let Some(d) = duration {
-        cmd.args(["-t", &format!("{d:.6}")]);
-    }
 
-    cmd.arg("-i")
-        .arg(input)
-        .args(["-vn", "-sn", "-dn", "-map", "0:a", "-c", "copy"])
-        .args(["-map_chapters", "-1"])
-        .args(FF_FLAGS)
-        .arg(output);
-
-    let _ = cmd.status();
-    output.exists() && fs::metadata(output).is_ok_and(|m| m.len() > 0)
+    let _ = fs::remove_file(output);
+    run_ffmpeg(&["-c:a", "flac"])
 }
 
 fn concat_segments(

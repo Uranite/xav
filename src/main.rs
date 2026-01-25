@@ -1,7 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 mod audio;
@@ -47,10 +46,12 @@ pub struct Args {
     pub worker: usize,
     pub scene_file: PathBuf,
     pub params: String,
+    pub resume: bool,
     pub noise: Option<u32>,
     pub audio: Option<audio::AudioSpec>,
     pub input: PathBuf,
     pub output: PathBuf,
+    pub no_crop: bool,
     pub decode_strat: Option<ffms::DecodeStrat>,
     pub chunk_buffer: usize,
     pub ranges: Option<Vec<(usize, usize)>>,
@@ -67,6 +68,9 @@ pub struct Args {
     #[cfg(feature = "vship")]
     pub probe_params: Option<String>,
     pub sc_only: bool,
+    pub keep: bool,
+    pub temp: Option<PathBuf>,
+    pub seek_mode: Option<u8>,
 }
 
 extern "C" fn restore() {
@@ -86,47 +90,53 @@ extern "C" fn exit_restore(_: i32) {
 fn print_help() {
     println!("{P}Format: {Y}xav {C}[options] {G}<INPUT> {B}[<OUTPUT>]{W}");
     println!();
-    println!("{C}-e {P}┃ {C}--encoder    {W}Encoder used: {R}<{G}svt-av1{P}┃{G}avm{P}┃{G}vvenc{P}┃{G}x265{P}┃{G}x264{R}>");
-    println!("{C}-p {P}┃ {C}--param      {W}Encoder params");
-    println!("{C}-w {P}┃ {C}--worker     {W}Encoder count");
-    println!("{C}-b {P}┃ {C}--buffer     {W}Extra chunks to hold in front buffer");
-    println!("{C}-s {P}┃ {C}--sc         {W}Specify SCD file. Auto gen if not specified");
-    println!("{C}-n {P}┃ {C}--noise      {W}Add noise {B}[1-64]{W}: {R}1{B}={W}ISO100, {R}64{B}={W}ISO6400");
-    println!("{C}-r {P}┃ {C}--range      {W}Trim and splice frame ranges: {G}\"10-20,90-100\"");
-    println!("{C}-a {P}┃ {C}--audio      {W}Encode to Opus: {Y}-a {G}\"{R}<{G}auto{P}┃{G}norm{P}┃{G}bitrate{R}> {R}<{G}all{P}┃{G}stream_ids{R}>{G}\"");
-    println!("                  {B}Examples: {Y}-a {G}\"auto all\"{W}, {Y}-a {G}\"norm 1\"{W}, {Y}-a {G}\"128 1,2\"");
+    println!("{C}-e   {P}┃ {C}--encoder      {W}Encoder used: {R}<{G}svt-av1{P}┃{G}avm{P}┃{G}vvenc{P}┃{G}x265{P}┃{G}x264{R}>");
+    println!("{C}-p   {P}┃ {C}--param        {W}Encoder params");
+    println!("{C}-w   {P}┃ {C}--worker       {W}Encoder count");
+    println!("{C}-b   {P}┃ {C}--buffer       {W}Extra chunks to hold in front buffer");
+    println!("{C}-s   {P}┃ {C}--sc           {W}Specify SCD file. Auto gen if not specified");
+    println!("{C}-n   {P}┃ {C}--noise        {W}Add noise {B}[1-64]{W}: {R}1{B}={W}ISO100, {R}64{B}={W}ISO6400");
+    println!("{C}-r   {P}┃ {C}--range        {W}Trim and splice frame ranges: {G}\"10-20,90-100\"");
+    println!("{C}-a   {P}┃ {C}--audio        {W}Encode to Opus: {Y}-a {G}\"{R}<{G}auto{P}┃{G}norm{P}┃{G}bitrate{R}> {R}<{G}all{P}┃{G}stream_ids{R}>{G}\"");
+    println!("                      {B}Examples: {Y}-a {G}\"auto all\"{W}, {Y}-a {G}\"norm 1\"{W}, {Y}-a {G}\"128 1,2\"");
     #[cfg(feature = "vship")]
     {
-        println!("{C}-t {P}┃ {C}--tq         {W}TQ Range: {R}<8{B}={W}Butter5pn, {R}8-10{B}={W}CVVDP, {R}>10{B}={W}SSIMU2: {Y}-t {G}9.00-9.01");
-        println!("{C}-m {P}┃ {C}--mode       {W}TQ Metric aggregation: {G}mean {W}or mean of worst N%: {G}p0.1");
-        println!("{C}-f {P}┃ {C}--qp         {W}CRF range for TQ: {Y}-f {G}0.25-69.75{W}");
-        println!("{C}-v {P}┃ {C}--vship      {W}Metric worker count");
-        println!("{C}-d {P}┃ {C}--display    {W}Display JSON file for CVVDP. Screen name must be {R}xav{W}");
+        println!("{C}-t   {P}┃ {C}--tq           {W}TQ Range: {R}<8{B}={W}Butter5pn, {R}8-10{B}={W}CVVDP, {R}>10{B}={W}SSIMU2: {Y}-t {G}9.00-9.01");
+        println!("{C}-m   {P}┃ {C}--mode         {W}TQ Metric aggregation: {G}mean {W}or mean of worst N%: {G}p0.1");
+        println!("{C}-f   {P}┃ {C}--qp           {W}CRF range for TQ: {Y}-f {G}0.25-69.75{W}");
+        println!("{C}-v   {P}┃ {C}--vship        {W}Metric worker count");
+        println!("{C}-d   {P}┃ {C}--display      {W}Display JSON file for CVVDP. Screen name must be {R}xav_screen{W}");
         println!("{C}-P {P}┃ {C}--alt-param  {W}Alt params for TQ probing ({R}NOT RECOMMENDED{W}; expert-only)");
     }
-    println!("   {P}┃ {C}--sc-only    {W}Exit after SCD");
+    println!("        {P}┃ {C}--sc-only      {W}Exit after SCD");
+    println!("{C}-nc  {P}┃ {C}--no-crop      {W}Disable automatic crop detection");
+    println!("{C}-res {P}┃ {C}--resume       {W}Resume previous session");
+    println!("{C}-k   {P}┃ {C}--keep         {W}Keep temporary files and folders after encoding");
+    println!("{C}-tmp {P}┃ {C}--temp         {W}Set temporary directory");
+    println!("{C}-sm  {P}┃ {C}--seek-mode    {W}Seek mode: {R}0{W} (linear access - default), {R}1{W} (seeking enabled)");
+    println!("{C}-da  {P}┃ {C}--drop-audio   {W}Drop all audio tracks from output");
 
     println!();
     println!("{P}Example:{W}");
-    println!("{Y}xav {P}\\{W}");
-    println!("  {C}-e {G}svt-av1          {P}\\  {B}# {W}Use svt-av1 as the encoder");
-    println!("  {C}-p {G}\"--scm 0 --lp 5\" {P}\\  {B}# {W}Params (after defaults) used by the encoder");
-    println!("  {C}-w {R}5                {P}\\  {B}# {W}Spawn {R}5 {W}encoder instances simultaneously");
-    println!("  {C}-b {R}1                {P}\\  {B}# {W}Decode {R}1 {W}extra chunk in memory for less waiting");
-    println!("  {C}-s {G}scd.txt          {P}\\  {B}# {W}Optionally use a scene file from external SCD tools");
-    println!("  {C}-n {R}4                {P}\\  {B}# {W}Add ISO-{R}400 {W}photon noise");
-    println!("  {C}-r {G}\"0-120,240-480\"  {P}\\  {B}# {W}Only encode given frame ranges and combine");
-    println!("  {C}-a {G}\"norm 1,2\"       {P}\\  {B}# {W}Encode {R}2 {W}streams using Opus with stereo downmixing");
+    println!("  {Y}xav {P}\\{W}");
+    println!("    {C}-e {G}svt-av1          {P}\\ {B}# {W}Use svt-av1 as the encoder");
+    println!("    {C}-p {G}\"--scm 0 --lp 5\" {P}\\ {B}# {W}Params (after defaults) used by the encoder");
+    println!("    {C}-w {R}5                {P}\\ {B}# {W}Spawn {R}5 {W}encoder instances simultaneously");
+    println!("    {C}-b {R}1                {P}\\ {B}# {W}Decode {R}1 {W}extra chunk in memory for less waiting");
+    println!("    {C}-s {G}scd.txt          {P}\\ {B}# {W}Optionally use a scene file from external SCD tools");
+    println!("    {C}-n {R}4                {P}\\ {B}# {W}Add ISO-{R}400 {W}photon noise");
+    println!("    {C}-r {G}\"0-120,240-480\"  {P}\\  {B}# {W}Only encode given frame ranges and combine");
+    println!("    {C}-a {G}\"norm 1,2\"       {P}\\ {B}# {W}Encode {R}2 {W}streams using Opus with stereo downmixing");
     #[cfg(feature = "vship")]
     {
-        println!("  {C}-t {G}9.444-9.555      {P}\\  {B}# {W}Enable TQ mode with CVVDP using this allowed range");
-        println!("  {C}-m {G}p1.25            {P}\\  {B}# {W}Use the mean of worst {R}1.25% {W}of frames for TQ scoring");
-        println!("  {C}-f {G}4.25-63.75       {P}\\  {B}# {W}Allowed CRF range for target quality mode");
-        println!("  {C}-v {R}3                {P}\\  {B}# {W}Spawn {R}3 {W}vship/metric workers");
-        println!("  {C}-d {G}display.json     {P}\\  {B}# {W}Uses {G}display.json {W}for CVVDP screen specification");
+        println!("    {C}-t {G}9.444-9.555      {P}\\ {B}# {W}Enable TQ mode with CVVDP using this allowed range");
+        println!("    {C}-m {G}p1.25            {P}\\ {B}# {W}Use the mean of worst {R}1.25% {W}of frames for TQ scoring");
+        println!("    {C}-f {G}4.25-63.75       {P}\\ {B}# {W}Allowed CRF range for target quality mode");
+        println!("    {C}-v {R}3                {P}\\ {B}# {W}Spawn {R}3 {W}vship/metric workers");
+        println!("    {C}-d {G}display.json     {P}\\ {B}# {W}Uses {G}display.json {W}for CVVDP screen specification");
     }
-    println!("  {G}input.mkv           {P}\\  {B}# {W}Name or path of the input file");
-    println!("  {G}output.mkv             {B}# {W}Optional output name");
+    println!("    {G}input.mkv              {P}\\ {B}# {W}Name or path of the input file");
+    println!("    {G}output.mkv             {B}# {W}Optional output name");
     println!();
     println!("{Y}Worker {P}┃ {Y}Buffer {P}┃ {Y}Metric worker count {W}depend on the OS");
     println!("hardware, content, parameters and other variables");
@@ -135,14 +145,110 @@ fn print_help() {
 
 fn parse_args() -> Args {
     let args: Vec<String> = std::env::args().collect();
-    match get_args(&args, true) {
+    let resume = args.iter().any(|arg| arg == "--resume" || arg == "-res");
+
+    let mut current = match get_args(&args) {
         Ok(args) => args,
         Err(e) => {
             eprintln!("\n{R}Error: {e}{N}\n");
             print_help();
             std::process::exit(1);
         }
+    };
+
+    if resume {
+        if let Ok(saved) = get_saved_args(&current.input, current.temp.as_ref()) {
+            current = merge_args(saved, current);
+        }
     }
+
+    apply_defaults(&mut current);
+
+    if current.scene_file == PathBuf::new()
+        || current.input == PathBuf::new()
+        || current.output == PathBuf::new()
+    {
+        eprintln!("Missing args");
+        print_help();
+        std::process::exit(1);
+    }
+
+    current
+}
+
+fn merge_args(mut base: Args, over: Args) -> Args {
+    if over.worker != 0 {
+        base.worker = over.worker;
+    }
+    if over.scene_file != PathBuf::new() {
+        base.scene_file = over.scene_file;
+    }
+    if !over.params.is_empty() {
+        base.params = over.params;
+    }
+
+    base.resume = true;
+
+    if over.noise.is_some() {
+        base.noise = over.noise;
+    }
+    if over.audio.is_some() {
+        base.audio = over.audio;
+    }
+    if over.input != PathBuf::new() {
+        base.input = over.input;
+    }
+    if over.output != PathBuf::new() {
+        base.output = over.output;
+    }
+    if over.no_crop {
+        base.no_crop = true;
+    }
+    if over.decode_strat.is_some() {
+        base.decode_strat = over.decode_strat;
+    }
+    #[cfg(feature = "vship")]
+    {
+        if over.qp_range.is_some() {
+            base.qp_range = over.qp_range;
+        }
+        if over.metric_worker != 0 {
+            base.metric_worker = over.metric_worker;
+        }
+        if over.target_quality.is_some() {
+            base.target_quality = over.target_quality;
+        }
+        if over.metric_mode != "mean" {
+            base.metric_mode = over.metric_mode;
+        }
+        if over.cvvdp_config.is_some() {
+            base.cvvdp_config = over.cvvdp_config;
+        }
+    }
+
+    base.resume = true;
+
+    if over.chunk_buffer != 0 {
+        base.chunk_buffer = over.chunk_buffer;
+    }
+
+    if over.keep {
+        base.keep = true;
+    }
+
+    if over.ranges.is_some() {
+        base.ranges = over.ranges;
+    }
+
+    if over.temp.is_some() {
+        base.temp = over.temp;
+    }
+
+    if let Some(val) = over.seek_mode {
+        base.seek_mode = Some(val);
+    }
+
+    base
 }
 
 fn parse_ranges(s: &str) -> Result<Vec<(usize, usize)>, Box<dyn std::error::Error>> {
@@ -180,7 +286,7 @@ fn apply_defaults(args: &mut Args) {
     }
 }
 
-fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::error::Error>> {
+fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
     if args.len() < 2 {
         return Err("Usage: xav [options] <input> <output>".into());
     }
@@ -194,7 +300,9 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
     #[cfg(feature = "vship")]
     let mut qp_range = None;
     let mut params = String::new();
+    let mut resume = false;
     let mut noise = None;
+    let mut no_crop = false;
     let mut audio = None;
     let mut encoder = crate::encoder::Encoder::default();
     let mut input = PathBuf::new();
@@ -208,6 +316,9 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
     let mut probe_params = None;
     let mut ranges = None;
     let mut sc_only = false;
+    let mut keep = false;
+    let mut temp = None;
+    let mut seek_mode = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -258,6 +369,10 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
                     params.clone_from(&args[i]);
                 }
             }
+            "--resume" | "-res" => {
+                resume = true;
+            }
+
             "-n" | "--noise" => {
                 i += 1;
                 if i < args.len() {
@@ -267,6 +382,9 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
                     }
                     noise = Some(val * 100);
                 }
+            }
+            "--no-crop" | "-nc" => {
+                no_crop = true;
             }
             "-a" | "--audio" => {
                 i += 1;
@@ -292,6 +410,21 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
                 i += 1;
                 if i < args.len() {
                     ranges = Some(parse_ranges(&args[i])?);
+                }
+            }
+            "-k" | "--keep" => {
+                keep = true;
+            }
+            "--temp" | "-tmp" => {
+                i += 1;
+                if i < args.len() {
+                    temp = Some(PathBuf::from(&args[i]));
+                }
+            }
+            "--seek-mode" | "-sm" => {
+                i += 1;
+                if i < args.len() {
+                    seek_mode = Some(args[i].parse()?);
                 }
             }
             #[cfg(feature = "vship")]
@@ -330,10 +463,6 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
         i += 1;
     }
 
-    if allow_resume && let Ok(saved_args) = get_saved_args(&input) {
-        return Ok(saved_args);
-    }
-
     if output != PathBuf::new() {
         let ext = output.extension().and_then(|e| e.to_str()).unwrap_or("");
         let containers = match encoder {
@@ -351,7 +480,7 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
 
     let chunk_buffer = worker + chunk_buffer.unwrap_or(0);
 
-    let mut result = Args {
+    let result = Args {
         encoder,
         worker,
         scene_file,
@@ -362,7 +491,9 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
         #[cfg(feature = "vship")]
         qp_range,
         params,
+        resume,
         noise,
+        no_crop,
         audio,
         input,
         output,
@@ -376,16 +507,10 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
         #[cfg(feature = "vship")]
         probe_params,
         sc_only,
+        keep,
+        temp,
+        seek_mode,
     };
-
-    apply_defaults(&mut result);
-
-    if result.scene_file == PathBuf::new()
-        || result.input == PathBuf::new()
-        || result.output == PathBuf::new()
-    {
-        return Err("Missing args".into());
-    }
 
     Ok(result)
 }
@@ -397,7 +522,8 @@ fn hash_input(path: &Path) -> String {
 }
 
 fn save_args(work_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let cmd: Vec<String> = std::env::args().collect();
+    let cmd: Vec<String> = std::env::args().filter(|arg| arg != "--resume").collect();
+
     let quoted_cmd: Vec<String> = cmd
         .iter()
         .map(|arg| if arg.contains(' ') { format!("\"{arg}\"") } else { arg.clone() })
@@ -406,15 +532,22 @@ fn save_args(work_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn get_saved_args(input: &Path) -> Result<Args, Box<dyn std::error::Error>> {
+fn get_saved_args(
+    input: &Path,
+    temp: Option<&PathBuf>,
+) -> Result<Args, Box<dyn std::error::Error>> {
     let hash = hash_input(input);
-    let work_dir = input.with_file_name(format!(".{}", &hash[..7]));
+    let work_dir = if let Some(t) = temp {
+        t.join(format!(".{}", &hash[..7]))
+    } else {
+        input.with_file_name(format!(".{}", &hash[..7]))
+    };
     let cmd_path = work_dir.join("cmd.txt");
 
     if cmd_path.exists() {
         let cmd_line = fs::read_to_string(cmd_path)?;
         let saved_args = parse_quoted_args(&cmd_line);
-        get_args(&saved_args, false)
+        get_args(&saved_args)
     } else {
         Err("No tmp dir found".into())
     }
@@ -477,9 +610,14 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     ensure_scene_file(args)?;
 
     println!();
+    println!("Press 'q' or 'Ctrl+C' to stop safely.");
 
     let hash = hash_input(&args.input);
-    let work_dir = args.input.with_file_name(format!(".{}", &hash[..7]));
+    let work_dir = if let Some(ref t) = args.temp {
+        t.join(format!(".{}", &hash[..7]))
+    } else {
+        args.input.with_file_name(format!(".{}", &hash[..7]))
+    };
 
     let is_new_encode = !work_dir.exists();
     #[cfg(feature = "vship")]
@@ -488,7 +626,7 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(work_dir.join("split"))?;
     fs::create_dir_all(work_dir.join("encode"))?;
 
-    if is_new_encode {
+    if is_new_encode || args.resume {
         save_args(&work_dir)?;
     }
 
@@ -509,7 +647,9 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
 
     let pipe_init = y4m::init_pipe();
 
-    let crop = {
+    let crop = if args.no_crop {
+        (0, 0)
+    } else {
         let config = crop::CropDetectConfig { sample_count: 13, min_black_pixels: 2 };
 
         match crop::detect_crop(&idx, &inf, &config) {
@@ -565,8 +705,21 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let chunks = chunk::chunkify(&scenes);
 
     let enc_start = std::time::Instant::now();
-    encode::encode_all(&chunks, &inf, &args, &idx, &work_dir, grain_table.as_ref(), pipe_reader);
+    let completed = encode::encode_all(
+        &chunks,
+        &inf,
+        &args,
+        &idx,
+        &work_dir,
+        grain_table.as_ref(),
+        pipe_reader,
+    );
     let enc_time = enc_start.elapsed();
+
+    if !completed {
+        eprintln!("\n{Y}Encoding aborted. Muxing skipped.{N}");
+        return Ok(());
+    }
 
     let video_mkv = work_dir.join("encode").join("video.mkv");
 
@@ -585,6 +738,7 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         },
         args.encoder,
         args.ranges.as_deref(),
+        args.keep,
     )?;
 
     if let Some(ref audio_spec) = args.audio
@@ -600,7 +754,9 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             inf.fps_den,
             inf.dar,
         )?;
-        fs::remove_file(&video_mkv)?;
+        if !args.keep {
+            fs::remove_file(&video_mkv)?;
+        }
     }
 
     let _ = crossterm::execute!(
@@ -658,7 +814,9 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     eh, em, es, enc_speed, ""
 );
 
-    fs::remove_dir_all(&work_dir)?;
+    if !args.keep {
+        fs::remove_dir_all(&work_dir)?;
+    }
 
     Ok(())
 }

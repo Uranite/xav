@@ -95,108 +95,143 @@ pub fn decode_chunks(
     skip: &HashSet<usize>,
     strat: DecodeStrat,
     sem: &Arc<Semaphore>,
+    shutdown: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    seek_mode: i32,
 ) {
     let thr = std::thread::available_parallelism().map_or(8, |n| n.get().try_into().unwrap_or(8));
-    let Ok(src) = thr_vid_src(idx, thr) else { return };
+    let Ok(src) = thr_vid_src(idx, thr, seek_mode) else { return };
 
     let filtered: Vec<Chunk> = chunks.iter().filter(|c| !skip.contains(&c.idx)).cloned().collect();
+
+    if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+        destroy_vid_src(src);
+        return;
+    }
 
     match strat {
         DecodeStrat::B10Fast => {
             let fsz = calc_packed_size(inf.width, inf.height);
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_10_fast(ch, src, inf, inf.width, inf.height, fsz)).ok();
             }
         }
         DecodeStrat::B10FastRem => {
             let fsz = calc_packed_size(inf.width, inf.height);
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_10_fast_rem(ch, src, inf, inf.width, inf.height, fsz)).ok();
             }
         }
         DecodeStrat::B10Stride => {
             let fsz = calc_packed_size(inf.width, inf.height);
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_10_stride(ch, src, inf, inf.width, inf.height, fsz)).ok();
             }
         }
         DecodeStrat::B10StrideRem => {
             let fsz = calc_packed_size(inf.width, inf.height);
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_10_stride_rem(ch, src, inf, inf.width, inf.height, fsz)).ok();
             }
         }
         DecodeStrat::B10CropFast { cc } => {
             let fsz = calc_packed_size(cc.new_w, cc.new_h);
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_10_crop_fast(ch, src, &cc, cc.new_w, cc.new_h, fsz)).ok();
             }
         }
         DecodeStrat::B10CropFastRem { cc } => {
             let fsz = calc_packed_size(cc.new_w, cc.new_h);
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_10_crop_fast_rem(ch, src, &cc, cc.new_w, cc.new_h, fsz)).ok();
             }
         }
         DecodeStrat::B10Crop { cc } => {
             let fsz = calc_packed_size(cc.new_w, cc.new_h);
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_10_crop(ch, src, &cc, cc.new_w, cc.new_h, fsz)).ok();
             }
         }
         DecodeStrat::B10CropRem { cc } => {
             let fsz = calc_packed_size(cc.new_w, cc.new_h);
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_10_crop_rem(ch, src, &cc, cc.new_w, cc.new_h, fsz)).ok();
             }
         }
         DecodeStrat::B10CropStride { cc } => {
             let fsz = calc_packed_size(cc.new_w, cc.new_h);
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_10_crop_stride(ch, src, &cc, cc.new_w, cc.new_h, fsz)).ok();
             }
         }
         DecodeStrat::B10CropStrideRem { cc } => {
             let fsz = calc_packed_size(cc.new_w, cc.new_h);
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_10_crop_stride_rem(ch, src, &cc, cc.new_w, cc.new_h, fsz)).ok();
             }
         }
         DecodeStrat::B8Fast => {
             let fsz = calc_8bit_size(inf.width, inf.height);
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_8_fast(ch, src, inf, inf.width, inf.height, fsz)).ok();
             }
         }
         DecodeStrat::B8Stride => {
             let fsz = calc_8bit_size(inf.width, inf.height);
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_8_stride(ch, src, inf, inf.width, inf.height, fsz)).ok();
             }
         }
         DecodeStrat::B8CropFast { cc } => {
             let fsz = calc_8bit_size(cc.new_w, cc.new_h);
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_8_crop_fast(ch, src, &cc, cc.new_w, cc.new_h, fsz)).ok();
             }
         }
         DecodeStrat::B8Crop { cc } => {
             let fsz = calc_8bit_size(cc.new_w, cc.new_h);
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_8_crop(ch, src, &cc, cc.new_w, cc.new_h, fsz)).ok();
             }
         }
@@ -204,7 +239,9 @@ pub fn decode_chunks(
             let fsz = calc_8bit_size(cc.new_w, cc.new_h);
             let mut buf = vec![0u8; calc_8bit_size(inf.width, inf.height)];
             for ch in &filtered {
-                sem.acquire();
+                if !sem.acquire_interruptible(shutdown) {
+                    break;
+                }
                 tx.send(dec_8_crop_stride(ch, src, inf, &cc, cc.new_w, cc.new_h, fsz, &mut buf))
                     .ok();
             }
@@ -480,6 +517,7 @@ pub fn decode_pipe(
     skip: &HashSet<usize>,
     strat: DecodeStrat,
     sem: &Arc<Semaphore>,
+    shutdown: &std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     let cc = match strat {
         DecodeStrat::B10CropFast { cc }
@@ -501,32 +539,32 @@ pub fn decode_pipe(
 
     match (inf.is_10bit, cc, has_rem) {
         (true, Some(cc), false) => {
-            pipe_loop(chunks, reader, skip, sem, tx, raw_fsz, |ch, raw| {
+            pipe_loop(chunks, reader, skip, sem, shutdown, tx, raw_fsz, |ch, raw| {
                 dec_pipe_10_crop(ch, raw, raw_fsz, &cc, fsz)
             });
         }
         (true, Some(cc), true) => {
-            pipe_loop(chunks, reader, skip, sem, tx, raw_fsz, |ch, raw| {
+            pipe_loop(chunks, reader, skip, sem, shutdown, tx, raw_fsz, |ch, raw| {
                 dec_pipe_10_crop_rem(ch, raw, raw_fsz, &cc, fsz)
             });
         }
         (true, None, false) => {
-            pipe_loop(chunks, reader, skip, sem, tx, raw_fsz, |ch, raw| {
+            pipe_loop(chunks, reader, skip, sem, shutdown, tx, raw_fsz, |ch, raw| {
                 dec_pipe_10(ch, raw, raw_fsz, w, h, fsz)
             });
         }
         (true, None, true) => {
-            pipe_loop(chunks, reader, skip, sem, tx, raw_fsz, |ch, raw| {
+            pipe_loop(chunks, reader, skip, sem, shutdown, tx, raw_fsz, |ch, raw| {
                 dec_pipe_10_rem(ch, raw, raw_fsz, w, h, fsz)
             });
         }
         (false, Some(cc), _) => {
-            pipe_loop(chunks, reader, skip, sem, tx, raw_fsz, |ch, raw| {
+            pipe_loop(chunks, reader, skip, sem, shutdown, tx, raw_fsz, |ch, raw| {
                 dec_pipe_8_crop(ch, raw, raw_fsz, &cc, fsz)
             });
         }
         (false, None, _) => {
-            pipe_loop(chunks, reader, skip, sem, tx, raw_fsz, |ch, raw| {
+            pipe_loop(chunks, reader, skip, sem, shutdown, tx, raw_fsz, |ch, raw| {
                 dec_pipe_8(ch, raw, fsz, w, h)
             });
         }
@@ -539,6 +577,7 @@ fn pipe_loop<F>(
     reader: &mut crate::y4m::PipeReader,
     skip: &HashSet<usize>,
     sem: &Arc<Semaphore>,
+    shutdown: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     tx: &Sender<WorkPkg>,
     raw_fsz: usize,
     decode: F,
@@ -553,7 +592,9 @@ fn pipe_loop<F>(
             continue;
         }
 
-        sem.acquire();
+        if !sem.acquire_interruptible(shutdown) {
+            return;
+        }
 
         let mut raw = vec![0u8; len * raw_fsz];
         for i in 0..len {

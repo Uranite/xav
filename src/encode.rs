@@ -26,6 +26,11 @@ pub fn get_frame(frames: &[u8], i: usize, frame_size: usize) -> &[u8] {
     &frames[start..start + frame_size]
 }
 
+pub static RUNNING_CHILDREN: std::sync::OnceLock<std::sync::Mutex<HashSet<u32>>> =
+    std::sync::OnceLock::new();
+pub static SHUTDOWN_GLOBAL: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 struct WorkerStats {
     completed: Arc<std::sync::atomic::AtomicUsize>,
     completions: Arc<std::sync::Mutex<ResumeInf>>,
@@ -72,15 +77,77 @@ pub fn encode_all(
     work_dir: &Path,
     grain_table: Option<&PathBuf>,
     pipe_reader: Option<crate::y4m::PipeReader>,
-) {
-    let resume_data = load_resume_data(work_dir);
+) -> bool {
+    let shutdown_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    // Input listener thread
+    {
+        let shutdown = Arc::clone(&shutdown_flag);
+        thread::spawn(move || {
+            let mut stopping = false;
+            let mut last_press = std::time::Instant::now();
+
+            loop {
+                if crossterm::event::poll(std::time::Duration::from_millis(500)).unwrap_or(false) {
+                    if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
+                        let is_q = key.code == crossterm::event::KeyCode::Char('q');
+                        let is_ctrl_c = key.code == crossterm::event::KeyCode::Char('c')
+                            && key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL);
+
+                        if is_q || is_ctrl_c {
+                            if last_press.elapsed() < std::time::Duration::from_millis(200) {
+                                continue;
+                            }
+                            last_press = std::time::Instant::now();
+
+                            if stopping {
+                                eprintln!("\n\x1b[1;91mForce quitting...\x1b[0m");
+                                SHUTDOWN_GLOBAL.store(true, std::sync::atomic::Ordering::Relaxed);
+                                if let Some(mutex) = RUNNING_CHILDREN.get() {
+                                    let mut pids = mutex.lock().unwrap();
+                                    for pid in pids.drain() {
+                                        #[cfg(target_os = "windows")]
+                                        {
+                                            let _ = std::process::Command::new("taskkill")
+                                                .args(["/F", "/PID", &pid.to_string()])
+                                                .output();
+                                        }
+                                        #[cfg(not(target_os = "windows"))]
+                                        unsafe {
+                                            libc::kill(pid as i32, libc::SIGKILL);
+                                        }
+                                    }
+                                }
+                                std::process::exit(130);
+                            } else {
+                                stopping = true;
+                                shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+                                eprintln!(
+                                    "\n\x1b[1;93mStopping... Press again to force quit.\x1b[0m"
+                                );
+                            }
+                        }
+                    }
+                }
+                if !stopping && shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+            }
+        });
+    }
+
+    let resume_data = if args.resume {
+        load_resume_data(work_dir)
+    } else {
+        crate::chunk::ResumeInf { chnks_done: Vec::new() }
+    };
 
     #[cfg(feature = "vship")]
     {
         let is_tq = args.target_quality.is_some() && args.qp_range.is_some();
         if is_tq {
-            encode_tq(chunks, inf, args, idx, work_dir, grain_table, pipe_reader);
-            return;
+            encode_tq(chunks, inf, args, idx, work_dir, grain_table, pipe_reader, &shutdown_flag);
+            return !shutdown_flag.load(std::sync::atomic::Ordering::Relaxed);
         }
     }
 
@@ -113,11 +180,23 @@ pub fn encode_all(
         let idx = Arc::clone(idx);
         let inf = inf.clone();
         let sem = Arc::clone(&sem);
+        let shutdown = Arc::clone(&shutdown_flag);
+        let seek_mode = args.seek_mode.unwrap_or(0) as i32;
         thread::spawn(move || {
             if let Some(mut reader) = pipe_reader {
-                decode_pipe(&chunks, &mut reader, &inf, &tx, &skip_indices, strat, &sem);
+                decode_pipe(&chunks, &mut reader, &inf, &tx, &skip_indices, strat, &sem, &shutdown);
             } else {
-                decode_chunks(&chunks, &idx, &inf, &tx, &skip_indices, strat, &sem);
+                decode_chunks(
+                    &chunks,
+                    &idx,
+                    &inf,
+                    &tx,
+                    &skip_indices,
+                    strat,
+                    &sem,
+                    &shutdown,
+                    seek_mode,
+                );
             }
         })
     };
@@ -133,6 +212,7 @@ pub fn encode_all(
         let wd = work_dir.to_path_buf();
         let prog_clone = Arc::clone(&prog);
         let sem_clone = Arc::clone(&sem);
+        let shutdown_clone = Arc::clone(&shutdown_flag);
         let encoder = args.encoder;
 
         let handle = thread::spawn(move || {
@@ -147,6 +227,7 @@ pub fn encode_all(
                 &prog_clone,
                 worker_id,
                 &sem_clone,
+                &shutdown_clone,
                 encoder,
             );
         });
@@ -159,6 +240,7 @@ pub fn encode_all(
     }
     drop(prog);
     display_handle.join().unwrap();
+    !shutdown_flag.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 #[derive(Copy, Clone)]
@@ -231,12 +313,15 @@ fn complete_chunk(
     use_cvvdp: bool,
     cvvdp_per_frame: bool,
     encoder: Encoder,
+    input_path: &Path,
+    inf: &crate::ffms::VidInf,
+    metric_name: &str,
 ) {
     let dst = work_dir.join("encode").join(format!("{chunk_idx:04}.{}", encoder.extension()));
     if probe_path != dst {
         std::fs::copy(probe_path, &dst).unwrap();
     }
-    done_tx.send(chunk_idx).unwrap();
+    done_tx.send(chunk_idx).ok();
 
     let file_size = std::fs::metadata(&dst).map_or(0, |m| m.len());
     let comp = crate::chunk::ChunkComp { idx: chunk_idx, frames: chunk_frames, size: file_size };
@@ -270,7 +355,12 @@ fn complete_chunk(
         frames: chunk_frames,
     };
     write_chunk_log(&log_entry, work_dir);
-    tq_logger.lock().unwrap().push(log_entry);
+
+    {
+        let mut logs = tq_logger.lock().unwrap();
+        logs.push(log_entry);
+        write_tq_log(input_path, inf, metric_name, &logs);
+    }
 
     let mut tq_scores = TQ_SCORES.get_or_init(|| std::sync::Mutex::new(Vec::new())).lock().unwrap();
     if use_cvvdp && !cvvdp_per_frame {
@@ -298,6 +388,9 @@ fn run_metrics_worker(
     tq_ctx: &TQCtx,
     encoder: Encoder,
     use_probe_params: bool,
+    shutdown: &Arc<std::sync::atomic::AtomicBool>,
+    input_path: &Path,
+    metric_name: &str,
 ) {
     let mut vship: Option<crate::vship::VshipProcessor> = None;
     let mut unpacked_buf = vec![0u8; if inf.is_10bit { pipe.conv_buf_size } else { 0 }];
@@ -328,7 +421,14 @@ fn run_metrics_worker(
                 tq_ctx.use_cvvdp,
                 tq_ctx.cvvdp_per_frame,
                 encoder,
+                input_path,
+                inf,
+                metric_name,
             );
+            continue;
+        }
+
+        if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
             continue;
         }
 
@@ -419,12 +519,26 @@ fn run_metrics_worker(
                     tq_ctx.use_cvvdp,
                     tq_ctx.cvvdp_per_frame,
                     encoder,
+                    input_path,
+                    inf,
+                    metric_name,
                 );
             }
         } else {
-            rework_tx.send(pkg).unwrap();
+            rework_tx.send(pkg).ok();
         }
     }
+}
+
+#[cfg(feature = "vship")]
+fn load_existing_tq_logs(work_dir: &Path) -> Vec<crate::tq::ProbeLog> {
+    let chunks_path = work_dir.join("chunks.json");
+    if !chunks_path.exists() {
+        return Vec::new();
+    }
+
+    let content = std::fs::read_to_string(chunks_path).unwrap_or_default();
+    content.lines().filter_map(|line| sonic_rs::from_str(line).ok()).collect()
 }
 
 #[cfg(feature = "vship")]
@@ -436,8 +550,13 @@ fn encode_tq(
     work_dir: &Path,
     grain_table: Option<&PathBuf>,
     pipe_reader: Option<crate::y4m::PipeReader>,
+    shutdown: &Arc<std::sync::atomic::AtomicBool>,
 ) {
-    let resume_data = load_resume_data(work_dir);
+    let resume_data = if args.resume {
+        load_resume_data(work_dir)
+    } else {
+        crate::chunk::ResumeInf { chnks_done: Vec::new() }
+    };
     let (skip_indices, completed_count, completed_frames) = build_skip_set(&resume_data);
 
     let tq_str = args.target_quality.as_ref().unwrap();
@@ -483,6 +602,9 @@ fn encode_tq(
         let enc_tx = enc_tx.clone();
         let permits_decoder = Arc::clone(&permits);
         let permits_done = Arc::clone(&permits);
+        let shutdown_decoder = Arc::clone(shutdown);
+        let shutdown_bg = Arc::clone(shutdown);
+        let seek_mode = args.seek_mode.unwrap_or(0) as i32;
 
         thread::spawn(move || {
             let (decode_tx, decode_rx) = bounded::<crate::worker::WorkPkg>(2);
@@ -498,6 +620,7 @@ fn encode_tq(
                         &skip_indices,
                         strat,
                         &permits_decoder,
+                        &shutdown_decoder,
                     );
                 } else {
                     decode_chunks(
@@ -508,21 +631,26 @@ fn encode_tq(
                         &skip_indices,
                         strat,
                         &permits_decoder,
+                        &shutdown_decoder,
+                        seek_mode,
                     );
                 }
             });
 
             let mut completed = 0;
             while completed < total_chunks {
+                if shutdown_bg.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
                 select! {
                     recv(decode_rx) -> pkg => {
                         if let Ok(pkg) = pkg {
-                            enc_tx.send(pkg).unwrap();
+                            enc_tx.send(pkg).ok();
                         }
                     }
                     recv(rework_rx) -> pkg => {
                         if let Ok(pkg) = pkg {
-                            enc_tx.send(pkg).unwrap();
+                            enc_tx.send(pkg).ok();
                         }
                     }
                     recv(done_rx) -> result => {
@@ -538,7 +666,19 @@ fn encode_tq(
     };
 
     let resume_state = Arc::new(std::sync::Mutex::new(resume_data.clone()));
-    let tq_logger = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let existing_logs = if args.resume { load_existing_tq_logs(work_dir) } else { Vec::new() };
+    if !existing_logs.is_empty() {
+        let metric_name = if tq_ctx.use_butteraugli {
+            "butteraugli"
+        } else if tq_ctx.use_cvvdp {
+            "cvvdp"
+        } else {
+            "ssimulacra2"
+        };
+        write_tq_log(&args.input, inf, metric_name, &existing_logs);
+    }
+    let tq_logger = Arc::new(std::sync::Mutex::new(existing_logs));
+
     let stats = Some(create_stats(completed_count, resume_data));
     let (prog, display_handle) = ProgsTrack::new(
         chunks,
@@ -566,6 +706,15 @@ fn encode_tq(
         let prog_clone = Arc::clone(&prog);
         let worker_count = args.worker;
         let use_probe_params = args.probe_params.is_some();
+        let shutdown = Arc::clone(shutdown);
+        let input_path = args.input.clone();
+        let metric_name = if tq_ctx.use_butteraugli {
+            "butteraugli"
+        } else if tq_ctx.use_cvvdp {
+            "cvvdp"
+        } else {
+            "ssimulacra2"
+        };
 
         metrics_workers.push(thread::spawn(move || {
             run_metrics_worker(
@@ -585,6 +734,9 @@ fn encode_tq(
                 &tq_ctx,
                 encoder,
                 use_probe_params,
+                &shutdown,
+                &input_path,
+                metric_name,
             );
         }));
     }
@@ -603,12 +755,17 @@ fn encode_tq(
         let qp_min = tq_ctx.qp_min;
         let qp_max = tq_ctx.qp_max;
         let target = tq_ctx.target;
+        let shutdown_worker = Arc::clone(shutdown);
         let encoder = args.encoder;
 
         workers.push(thread::spawn(move || {
             let mut conv_buf = vec![0u8; pipe.conv_buf_size];
 
             while let Ok(mut pkg) = rx.recv() {
+                if shutdown_worker.load(std::sync::atomic::Ordering::Relaxed) {
+                    continue;
+                }
+
                 let tq = pkg.tq_state.get_or_insert_with(|| crate::worker::TQState {
                     probes: Vec::new(),
                     probe_sizes: Vec::new(),
@@ -692,7 +849,7 @@ fn encode_tq(
     } else {
         "ssimulacra2"
     };
-    write_tq_log(&args.input, work_dir, inf, metric_name);
+    write_tq_log(&args.input, inf, metric_name, &tq_logger.lock().unwrap());
     drop(prog);
     display_handle.join().unwrap();
 }
@@ -754,6 +911,12 @@ fn enc_tq_probe(
 
     let mut cmd = make_enc_cmd(encoder, &cfg);
     let mut child = cmd.spawn().unwrap();
+    let pid = child.id();
+    RUNNING_CHILDREN
+        .get_or_init(|| std::sync::Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap()
+        .insert(pid);
 
     let last_score = pkg.tq_state.as_ref().and_then(|tq| tq.probes.last().map(|probe| probe.score));
     match encoder {
@@ -777,7 +940,14 @@ fn enc_tq_probe(
     (pipe.write_frames)(child.stdin.as_mut().unwrap(), &pkg.yuv, pkg.frame_count, conv_buf, pipe);
 
     let status = child.wait().unwrap();
+    if let Some(children) = RUNNING_CHILDREN.get() {
+        children.lock().unwrap().remove(&pid);
+    }
+
     if !status.success() {
+        if SHUTDOWN_GLOBAL.load(std::sync::atomic::Ordering::Relaxed) {
+            return out.to_path_buf();
+        }
         std::process::exit(1);
     }
 
@@ -795,11 +965,17 @@ fn run_enc_worker(
     prog: &Arc<ProgsTrack>,
     worker_id: usize,
     sem: &Arc<Semaphore>,
+    shutdown: &Arc<std::sync::atomic::AtomicBool>,
     encoder: Encoder,
 ) {
     let mut conv_buf = vec![0u8; pipe.conv_buf_size];
 
     while let Ok(mut pkg) = rx.recv() {
+        if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+            sem.release();
+            continue;
+        }
+
         enc_chunk(
             &mut pkg,
             -1.0,
@@ -868,6 +1044,12 @@ fn enc_chunk(
 
     let mut cmd = make_enc_cmd(encoder, &cfg);
     let mut child = cmd.spawn().unwrap();
+    let pid = child.id();
+    RUNNING_CHILDREN
+        .get_or_init(|| std::sync::Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap()
+        .insert(pid);
 
     match encoder {
         Encoder::SvtAv1 | Encoder::X265 | Encoder::X264 => prog.watch_enc(
@@ -892,7 +1074,14 @@ fn enc_chunk(
     pkg.yuv = Vec::new();
 
     let status = child.wait().unwrap();
+    if let Some(children) = RUNNING_CHILDREN.get() {
+        children.lock().unwrap().remove(&pid);
+    }
+
     if !status.success() {
+        if SHUTDOWN_GLOBAL.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         std::process::exit(1);
     }
 }
@@ -911,7 +1100,8 @@ pub fn write_chunk_log(chunk_log: &crate::tq::ProbeLog, work_dir: &Path) {
         .join(",");
 
     let line = format!(
-        "{{\"id\":{},\"r\":{},\"f\":{},\"p\":[{}],\"fc\":{:.2},\"fs\":{:.4},\"fz\":{}}}\n",
+        "{{\"chunk_idx\":{},\"round\":{},\"frames\":{},\"probes\":[{}],\"final_crf\":{:.2},\"\
+         final_score\":{:.4},\"final_size\":{}}}\n",
         chunk_log.chunk_idx,
         chunk_log.round,
         chunk_log.frames,
@@ -927,27 +1117,13 @@ pub fn write_chunk_log(chunk_log: &crate::tq::ProbeLog, work_dir: &Path) {
 }
 
 #[cfg(feature = "vship")]
-fn write_tq_log(input: &Path, work_dir: &Path, inf: &VidInf, metric_name: &str) {
+fn write_tq_log(input: &Path, inf: &VidInf, metric_name: &str, all_logs: &[crate::tq::ProbeLog]) {
     use std::collections::BTreeMap;
     use std::fmt::Write;
     use std::fs::OpenOptions;
-    use std::io::{BufRead, Write as IoWrite};
-
-    use serde::Deserialize;
-
-    #[derive(Deserialize)]
-    struct ChunkLine {
-        id: usize,
-        r: usize,
-        f: usize,
-        p: Vec<(f64, f64, u64)>,
-        fc: f64,
-        fs: f64,
-        fz: u64,
-    }
+    use std::io::Write as IoWrite;
 
     let log_path = input.with_extension("json");
-    let chunks_path = work_dir.join("chunks.json");
 
     let fps = f64::from(inf.fps_num) / f64::from(inf.fps_den);
 
@@ -956,31 +1132,21 @@ fn write_tq_log(input: &Path, work_dir: &Path, inf: &VidInf, metric_name: &str) 
         if duration > 0.0 { (size as f64 * 8.0) / duration / 1000.0 } else { 0.0 }
     };
 
-    let mut all_logs: Vec<ChunkLine> = Vec::new();
-
-    if let Ok(file) = std::fs::File::open(&chunks_path) {
-        for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
-            if let Ok(cl) = sonic_rs::from_str::<ChunkLine>(&line) {
-                all_logs.push(cl);
-            }
-        }
-    }
-
     let total = all_logs.len();
     if total == 0 {
         return;
     }
 
-    let avg_probes = all_logs.iter().map(|l| l.p.len()).sum::<usize>() as f64 / total as f64;
-    let in_range = all_logs.iter().filter(|l| l.r <= 6).count();
+    let avg_probes = all_logs.iter().map(|l| l.probes.len()).sum::<usize>() as f64 / total as f64;
+    let in_range = all_logs.iter().filter(|l| l.round <= 6).count();
     let out_range = total - in_range;
 
     let mut round_counts: BTreeMap<usize, usize> = BTreeMap::new();
     let mut crf_counts: BTreeMap<u64, usize> = BTreeMap::new();
 
-    for l in &all_logs {
-        *round_counts.entry(l.p.len()).or_insert(0) += 1;
-        let crf_key = (l.fc * 100.0).round() as u64;
+    for l in all_logs {
+        *round_counts.entry(l.probes.len()).or_insert(0) += 1;
+        let crf_key = (l.final_crf * 100.0).round() as u64;
         *crf_counts.entry(crf_key).or_insert(0) += 1;
     }
 
@@ -992,18 +1158,19 @@ fn write_tq_log(input: &Path, work_dir: &Path, inf: &VidInf, metric_name: &str) 
         _ => "akima",
     };
 
-    all_logs.sort_by_key(|l| l.id);
+    let mut sorted_logs = all_logs.to_vec();
+    sorted_logs.sort_by_key(|l| l.chunk_idx);
 
     let mut out = String::new();
     let _ = writeln!(out, "{{");
     let _ = writeln!(out, "  \"chunks_{metric_name}\": [");
 
-    for (i, l) in all_logs.iter().enumerate() {
-        let mut sorted_probes: Vec<_> = l.p.iter().collect();
+    for (i, l) in sorted_logs.iter().enumerate() {
+        let mut sorted_probes: Vec<_> = l.probes.iter().collect();
         sorted_probes.sort_by(|(a, _, _), (b, _, _)| a.partial_cmp(b).unwrap());
 
         let _ = writeln!(out, "    {{");
-        let _ = writeln!(out, "      \"id\": {},", l.id);
+        let _ = writeln!(out, "      \"id\": {},", l.chunk_idx);
         let _ = writeln!(out, "      \"probes\": [");
 
         for (j, (c, s, sz)) in sorted_probes.iter().enumerate() {
@@ -1011,7 +1178,7 @@ fn write_tq_log(input: &Path, work_dir: &Path, inf: &VidInf, metric_name: &str) 
             let _ = writeln!(
                 out,
                 "        {{ \"crf\": {c:.2}, \"score\": {s:.3}, \"kbs\": {:.0} }}{comma}",
-                calc_kbs(*sz, l.f)
+                calc_kbs(*sz, l.frames)
             );
         }
 
@@ -1019,15 +1186,15 @@ fn write_tq_log(input: &Path, work_dir: &Path, inf: &VidInf, metric_name: &str) 
         let _ = writeln!(
             out,
             "      \"final\": {{ \"crf\": {:.2}, \"score\": {:.3}, \"kbs\": {:.0} }}",
-            l.fc,
-            l.fs,
-            calc_kbs(l.fz, l.f)
+            l.final_crf,
+            l.final_score,
+            calc_kbs(l.final_size, l.frames)
         );
 
-        let comma = if i + 1 < all_logs.len() { "," } else { "" };
+        let comma = if i + 1 < sorted_logs.len() { "," } else { "" };
         let _ = writeln!(out, "    }}{comma}");
 
-        if i + 1 < all_logs.len() {
+        if i + 1 < sorted_logs.len() {
             let _ = writeln!(out);
         }
     }

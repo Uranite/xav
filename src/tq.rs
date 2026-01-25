@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::interp::{akima, fritsch_carlson, lerp, pchip};
 
 pub const JOD_A: f64 = 0.043_956_939_131_021_5;
@@ -11,14 +13,14 @@ pub fn jod(q: f64) -> f64 {
     JOD_A.mul_add(-q.powf(JOD_EXP), 10.0)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Probe {
     pub crf: f64,
     pub score: f64,
     pub frame_scores: Vec<f64>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ProbeLog {
     pub chunk_idx: usize,
     pub probes: Vec<(f64, f64, u64)>,
@@ -78,7 +80,7 @@ macro_rules! calc_metrics_impl {
             let idx = crate::ffms::VidIdx::new(probe_path, false).unwrap();
             let threads =
                 std::thread::available_parallelism().map_or(8, |n| n.get().try_into().unwrap_or(8));
-            let src = crate::ffms::thr_vid_src(&idx, threads).unwrap();
+            let src = crate::ffms::thr_vid_src(&idx, threads, 0).unwrap();
 
             let mut scores = Vec::with_capacity(pkg.frame_count);
             let frame_size = pipe.frame_size;

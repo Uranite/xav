@@ -83,6 +83,9 @@ fn test_roundtrip(filename: &str, crop: (u32, u32)) {
     let idx_c = Arc::clone(&idx);
     let inf_c = inf.clone();
     let sem_c = Arc::clone(&sem);
+    let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let shutdown_c = Arc::clone(&shutdown);
+
     thread::spawn(move || {
         decode_chunks(
             &[Chunk { idx: 0, start: 0, end: 10, params: None }],
@@ -92,12 +95,14 @@ fn test_roundtrip(filename: &str, crop: (u32, u32)) {
             &HashSet::new(),
             decode_strat,
             &sem_c,
+            &shutdown_c,
+            0,
         );
     });
 
     let pkg = rx.recv().unwrap();
     let frame_size = pkg.yuv.len() / pkg.frame_count;
-    let Ok(source) = thr_vid_src(&idx, 1) else {
+    let Ok(source) = thr_vid_src(&idx, 1, 0) else {
         panic!("Failed to create video source");
     };
 
