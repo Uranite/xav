@@ -30,6 +30,15 @@ b-termux = [
     "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'embed-bitcode=yes']"
 ]
 
+b-linux = [
+    "install",
+    "--path",
+    ".",
+    "--features", "vship",
+    "--config",
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests']"
+]
+
 ci-b-static-nvidia = [
     "build",
     "--release",
