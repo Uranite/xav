@@ -111,6 +111,7 @@ fn build_windows() {
 
 fn build_unix() {
     if !cfg!(feature = "static") {
+        println!("cargo:rustc-link-search=native=/usr/local/lib");
         println!("cargo:rustc-link-lib=ffms2");
         #[cfg(feature = "vship")]
         println!("cargo:rustc-link-lib=vship");
