@@ -95,9 +95,10 @@ pub fn decode_chunks(
     skip: &HashSet<usize>,
     strat: DecodeStrat,
     sem: &Arc<Semaphore>,
+    seek_mode: i32,
 ) {
     let thr = std::thread::available_parallelism().map_or(8, |n| n.get().try_into().unwrap_or(8));
-    let Ok(src) = thr_vid_src(idx, thr) else { return };
+    let Ok(src) = thr_vid_src(idx, thr, seek_mode) else { return };
 
     let filtered: Vec<Chunk> = chunks.iter().filter(|c| !skip.contains(&c.idx)).cloned().collect();
 

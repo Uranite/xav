@@ -62,6 +62,7 @@ pub struct Args {
     pub metric_mode: String,
     #[cfg(feature = "vship")]
     pub cvvdp_config: Option<String>,
+    pub seek_mode: Option<u8>,
 }
 
 extern "C" fn restore() {
@@ -94,7 +95,7 @@ fn print_help() {
         println!("{C}-v {P}┃ {C}--vship    {W}Metric worker count");
         println!("{C}-d {P}┃ {C}--display  {W}Display JSON file for CVVDP. Screen name must be {R}xav{W}");
     }
-
+    println!("{C}-sm {P}┃ {C}--seek-mode  {W}Seek mode: {R}0{W} (linear access - default), {R}1{W} (seeking enabled)");
     println!();
     println!("{P}Example:{W}");
     println!("{Y}xav {P}\\{W}");
@@ -194,6 +195,7 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
     #[cfg(feature = "vship")]
     let mut cvvdp_config = None;
     let mut ranges = None;
+    let mut seek_mode = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -280,6 +282,12 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
                     ranges = Some(parse_ranges(&args[i])?);
                 }
             }
+            "-sm" | "--seek-mode" => {
+                i += 1;
+                if i < args.len() {
+                    seek_mode = Some(args[i].parse()?);
+                }
+            }
             #[cfg(feature = "vship")]
             "-d" | "--display" => {
                 i += 1;
@@ -343,6 +351,7 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Box<dyn std::er
         metric_worker,
         #[cfg(feature = "vship")]
         cvvdp_config,
+        seek_mode,
     };
 
     apply_defaults(&mut result);
