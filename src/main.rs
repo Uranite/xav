@@ -71,6 +71,7 @@ pub struct Args {
     pub keep: bool,
     pub temp: Option<PathBuf>,
     pub seek_mode: Option<u8>,
+    pub drop_audio: bool,
 }
 
 extern "C" fn restore() {
@@ -248,6 +249,10 @@ fn merge_args(mut base: Args, over: Args) -> Args {
         base.seek_mode = Some(val);
     }
 
+    if over.drop_audio {
+        base.drop_audio = true;
+    }
+
     base
 }
 
@@ -319,6 +324,7 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
     let mut keep = false;
     let mut temp = None;
     let mut seek_mode = None;
+    let mut drop_audio = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -427,6 +433,9 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
                     seek_mode = Some(args[i].parse()?);
                 }
             }
+            "-da" | "--drop-audio" => {
+                drop_audio = true;
+            }
             #[cfg(feature = "vship")]
             "-d" | "--display" => {
                 i += 1;
@@ -478,6 +487,10 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
         }
     }
 
+    if audio.is_some() && drop_audio {
+        return Err("Cannot use both --audio and --drop-audio".into());
+    }
+
     let chunk_buffer = worker + chunk_buffer.unwrap_or(0);
 
     let result = Args {
@@ -510,6 +523,7 @@ fn get_args(args: &[String]) -> Result<Args, Box<dyn std::error::Error>> {
         keep,
         temp,
         seek_mode,
+        drop_audio,
     };
 
     Ok(result)
@@ -731,7 +745,11 @@ fn main_with_args(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             &args.output
         },
         &inf,
-        if args.audio.is_some() || args.encoder == encoder::Encoder::Avm {
+        if (args.audio.is_some() || args.encoder == encoder::Encoder::Avm)
+            && !args.drop_audio
+        {
+            None
+        } else if args.drop_audio {
             None
         } else {
             Some(&args.input)
