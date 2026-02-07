@@ -292,18 +292,38 @@ fn watch_svt(
 ) {
     let reader = BufReader::new(stderr);
     let mut last_frames = 0;
+    let mut history = Vec::new();
+    let mut error_seen = false;
 
     for line in reader.split(b'\r').filter_map(Result::ok) {
         let Ok(text) = std::str::from_utf8(&line) else { continue };
         let text = text.trim();
 
-        if text.contains("error") || text.contains("Error") {
-            print!("\x1b[?1049l");
-            std::io::stdout().flush().unwrap();
-            eprintln!("{text}");
+        if text.is_empty() {
+            continue;
         }
 
-        if text.is_empty() || !text.contains("Encoding:") || text.contains("SUMMARY") {
+        let is_error = text.contains("error") || text.contains("Error");
+
+        if is_error {
+            if !error_seen {
+                let _ = crossterm::execute!(
+                    std::io::stderr(),
+                    crossterm::terminal::LeaveAlternateScreen
+                );
+                for h in &history {
+                    eprintln!("{h}");
+                }
+                error_seen = true;
+            }
+            eprintln!("{text}");
+        } else if error_seen {
+            eprintln!("{text}");
+        } else if !text.contains("Encoding:") && !text.contains("SUMMARY") {
+            history.push(text.to_string());
+        }
+
+        if !text.contains("Encoding:") || text.contains("SUMMARY") {
             continue;
         }
 
