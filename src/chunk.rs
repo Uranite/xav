@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::io::{Read, Write};
 
 use crate::encoder::Encoder;
 
@@ -413,14 +414,14 @@ fn run_merge(
         .args(FF_FLAGS)
         .arg(&video);
 
-    let status = cmd.status()?;
+    let (status, err_out) = run_ffmpeg_verbose(&mut cmd)?;
     let _ = fs::remove_file(&concat_list);
 
     if !status.success() {
         if input.is_some() {
             let _ = fs::remove_file(&video);
         }
-        return Err("FFmpeg video concat failed".into());
+        return Err(format!("FFmpeg video concat failed: {}", err_out).into());
     }
 
     if let Some(input) = input {
@@ -465,12 +466,12 @@ fn run_merge(
         }
         cmd2.args(FF_FLAGS).arg(output);
 
-        let status2 = cmd2.status()?;
+        let (status2, err_out) = run_ffmpeg_verbose(&mut cmd2)?;
         let _ = fs::remove_file(&video);
         let _ = fs::remove_file(&temp_audio);
 
         if !status2.success() {
-            return Err("FFmpeg mux failed".into());
+            return Err(format!("FFmpeg mux failed: {}", err_out).into());
         }
     }
 
@@ -527,11 +528,11 @@ fn mux_av(
     }
     cmd.args(FF_FLAGS).arg(output);
 
-    let status = cmd.status()?;
+    let (status, err_out) = run_ffmpeg_verbose(&mut cmd)?;
     let _ = fs::remove_file(&temp_audio);
 
     if !status.success() {
-        return Err("FFmpeg mux failed".into());
+        return Err(format!("FFmpeg mux failed: {}", err_out).into());
     }
 
     if ranges.is_none() && output.extension().is_some_and(|e| e == "mp4") {
@@ -660,4 +661,37 @@ fn extract_audio_ranges(
 pub fn ranges_to_times(ranges: &[(usize, usize)], fps_num: u32, fps_den: u32) -> Vec<(f64, f64)> {
     let fps = f64::from(fps_num) / f64::from(fps_den);
     ranges.iter().map(|&(s, e)| (s as f64 / fps, (e + 1) as f64 / fps)).collect()
+}
+
+fn run_ffmpeg_verbose(
+    cmd: &mut Command,
+) -> Result<(std::process::ExitStatus, String), Box<dyn std::error::Error>> {
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd.spawn()?;
+    let mut stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+
+    let mut buffer = Vec::with_capacity(4096);
+    let mut buf = [0u8; 1024];
+
+    loop {
+        let n = stderr.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        let chunk = &buf[..n];
+        std::io::stderr().write_all(chunk)?;
+
+        buffer.extend_from_slice(chunk);
+        if buffer.len() > 8096 {
+            let keep = 4096;
+            let start = buffer.len() - keep;
+            buffer.drain(0..start);
+        }
+    }
+
+    let status = child.wait()?;
+    let err_out = String::from_utf8_lossy(&buffer).into_owned();
+    Ok((status, err_out))
 }
