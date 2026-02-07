@@ -146,7 +146,6 @@ fn print_help() {
 
 fn parse_args() -> Args {
     let args: Vec<String> = std::env::args().collect();
-    let resume = args.iter().any(|arg| arg == "--resume" || arg == "-res");
 
     let mut current = match get_args(&args) {
         Ok(args) => args,
@@ -156,12 +155,6 @@ fn parse_args() -> Args {
             std::process::exit(1);
         }
     };
-
-    if resume {
-        if let Ok(saved) = get_saved_args(&current.input, current.temp.as_ref()) {
-            current = merge_args(saved, current);
-        }
-    }
 
     apply_defaults(&mut current);
 
@@ -175,85 +168,6 @@ fn parse_args() -> Args {
     }
 
     current
-}
-
-fn merge_args(mut base: Args, over: Args) -> Args {
-    if over.worker != 0 {
-        base.worker = over.worker;
-    }
-    if over.scene_file != PathBuf::new() {
-        base.scene_file = over.scene_file;
-    }
-    if !over.params.is_empty() {
-        base.params = over.params;
-    }
-
-    base.resume = true;
-
-    if over.noise.is_some() {
-        base.noise = over.noise;
-    }
-    if over.audio.is_some() {
-        base.audio = over.audio;
-    }
-    if over.input != PathBuf::new() {
-        base.input = over.input;
-    }
-    if over.output != PathBuf::new() {
-        base.output = over.output;
-    }
-    if over.no_crop {
-        base.no_crop = true;
-    }
-    if over.decode_strat.is_some() {
-        base.decode_strat = over.decode_strat;
-    }
-    #[cfg(feature = "vship")]
-    {
-        if over.qp_range.is_some() {
-            base.qp_range = over.qp_range;
-        }
-        if over.metric_worker != 0 {
-            base.metric_worker = over.metric_worker;
-        }
-        if over.target_quality.is_some() {
-            base.target_quality = over.target_quality;
-        }
-        if over.metric_mode != "mean" {
-            base.metric_mode = over.metric_mode;
-        }
-        if over.cvvdp_config.is_some() {
-            base.cvvdp_config = over.cvvdp_config;
-        }
-    }
-
-    base.resume = true;
-
-    if over.chunk_buffer != 0 {
-        base.chunk_buffer = over.chunk_buffer;
-    }
-
-    if over.keep {
-        base.keep = true;
-    }
-
-    if over.ranges.is_some() {
-        base.ranges = over.ranges;
-    }
-
-    if over.temp.is_some() {
-        base.temp = over.temp;
-    }
-
-    if let Some(val) = over.seek_mode {
-        base.seek_mode = Some(val);
-    }
-
-    if over.drop_audio {
-        base.drop_audio = true;
-    }
-
-    base
 }
 
 fn parse_ranges(s: &str) -> Result<Vec<(usize, usize)>, Box<dyn std::error::Error>> {
@@ -544,52 +458,6 @@ fn save_args(work_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
         .collect();
     fs::write(work_dir.join("cmd.txt"), quoted_cmd.join(" "))?;
     Ok(())
-}
-
-fn get_saved_args(
-    input: &Path,
-    temp: Option<&PathBuf>,
-) -> Result<Args, Box<dyn std::error::Error>> {
-    let hash = hash_input(input);
-    let work_dir = if let Some(t) = temp {
-        t.join(format!(".{}", &hash[..7]))
-    } else {
-        input.with_file_name(format!(".{}", &hash[..7]))
-    };
-    let cmd_path = work_dir.join("cmd.txt");
-
-    if cmd_path.exists() {
-        let cmd_line = fs::read_to_string(cmd_path)?;
-        let saved_args = parse_quoted_args(&cmd_line);
-        get_args(&saved_args)
-    } else {
-        Err("No tmp dir found".into())
-    }
-}
-
-fn parse_quoted_args(cmd_line: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    let mut current_arg = String::new();
-    let mut in_quotes = false;
-
-    for ch in cmd_line.chars() {
-        match ch {
-            '"' => in_quotes = !in_quotes,
-            ' ' if !in_quotes => {
-                if !current_arg.is_empty() {
-                    args.push(current_arg.clone());
-                    current_arg.clear();
-                }
-            }
-            _ => current_arg.push(ch),
-        }
-    }
-
-    if !current_arg.is_empty() {
-        args.push(current_arg);
-    }
-
-    args
 }
 
 fn ensure_scene_file(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
