@@ -577,7 +577,8 @@ fn extract_segment(input: &Path, output: &Path, start: Option<f64>, duration: Op
 
         cmd.arg("-i")
             .arg(input)
-            .args(["-vn", "-sn", "-dn", "-map", "0:a", "-c", "copy"])
+            .args(["-vn", "-sn", "-dn", "-map", "0:a"])
+            .args(args)
             .args(["-map_chapters", "-1"])
             .args(FF_FLAGS)
             .arg(output);
