@@ -684,9 +684,9 @@ fn draw_screen(
             crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine)
         );
         if !line.is_empty() {
-            let _ = crossterm::queue!(stdout, crossterm::style::Print(line));
+            let _ = crossterm::queue!(std::io::stdout(), crossterm::style::Print(line));
         }
-        let _ = crossterm::queue!(stdout, crossterm::style::Print("\n"));
+        let _ = crossterm::queue!(std::io::stdout(), crossterm::style::Print("\n"));
     }
 
     let _ = crossterm::queue!(
@@ -744,5 +744,5 @@ fn draw_screen(
             state.total_chunks, state.total_frames
         ))
     );
-    let _ = stdout.flush();
+    let _ = std::io::stdout().flush();
 }
