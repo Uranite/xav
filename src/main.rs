@@ -91,6 +91,7 @@ pub struct Args {
     pub decode_strat: Option<DecodeStrat>,
     pub chunk_buffer: usize,
     pub ranges: Option<Vec<(usize, usize)>>,
+    pub temp: Option<PathBuf>,
     #[cfg(feature = "vship")]
     pub qp_range: Option<String>,
     #[cfg(feature = "vship")]
@@ -137,6 +138,7 @@ fn print_help() {
         println!("{C}-d {P}┃ {C}--display    {W}Display JSON file for CVVDP. Screen name must be {R}xav{W}");
         println!("{C}-P {P}┃ {C}--alt-param  {W}Alt params for TQ probing ({R}NOT RECOMMENDED{W}; expert-only)");
     }
+    println!("{C}-T {P}┃ {C}--temp       {W}Parent folder for the temporary work directory");
     println!("   {P}┃ {C}--hwaccel    {W}Use Vulkan hw decoding (perf depends on the input video and hardware)");
     println!("   {P}┃ {C}--sc-only    {W}Exit after SCD");
 
@@ -151,6 +153,7 @@ fn print_help() {
     println!("  {C}-n {R}4                {P}\\  {B}# {W}Add ISO-{R}400 {W}photon noise");
     println!("  {C}-r {G}\"0-120,240-480\"  {P}\\  {B}# {W}Only encode given frame ranges and combine");
     println!("  {C}-a {G}\"norm 1,2\"       {P}\\  {B}# {W}Encode {R}2 {W}streams using Opus with stereo downmixing");
+    println!("  {C}-T {G}C:\\xav_temp      {P}\\  {B}# {W}Store the temporary .<hash> folder inside C:\\xav_temp");
     #[cfg(feature = "vship")]
     {
         println!("  {C}-t {G}9.444-9.555      {P}\\  {B}# {W}Enable TQ mode with CVVDP using this allowed range");
@@ -283,7 +286,7 @@ fn parse_args_loop(args: &[String]) -> Result<Args, Xerr> {
     let (mut worker, mut chunk_buffer, mut sc_only, mut hwaccel) = (1usize, None, false, false);
     let (mut scene_file, mut input, mut output) = (PathBuf::new(), PathBuf::new(), PathBuf::new());
     let (mut encoder, mut params) = (Encoder::default(), String::new());
-    let (mut noise, mut audio, mut ranges) = (None, None, None);
+    let (mut noise, mut audio, mut ranges, mut temp) = (None, None, None, None);
     #[cfg(feature = "vship")]
     let (mut target_quality, mut qp_range, mut cvvdp_config, mut probe_params) = (
         None::<String>,
@@ -320,6 +323,11 @@ fn parse_args_loop(args: &[String]) -> Result<Args, Xerr> {
             "-n" | "--noise" => {
                 if let Some(v) = next_arg(args, &mut i) {
                     noise = Some(parse_noise(v)?);
+                }
+            }
+            "-T" | "--temp" => {
+                if let Some(v) = next_arg(args, &mut i) {
+                    temp = Some(PathBuf::from(v));
                 }
             }
             #[cfg(feature = "vship")]
@@ -364,6 +372,7 @@ fn parse_args_loop(args: &[String]) -> Result<Args, Xerr> {
         decode_strat: None,
         chunk_buffer: worker + chunk_buffer.unwrap_or(0),
         ranges,
+        temp,
         sc_only,
         hwaccel,
         #[cfg(feature = "vship")]
@@ -388,7 +397,7 @@ fn get_args(args: &[String], allow_resume: bool) -> Result<Args, Xerr> {
 
     let mut result = parse_args_loop(args)?;
 
-    if allow_resume && let Ok(saved_args) = get_saved_args(&result.input) {
+    if allow_resume && let Ok(saved_args) = get_saved_args(&result) {
         return Ok(saved_args);
     }
     if result.output != PathBuf::new() {
@@ -439,10 +448,15 @@ fn save_args(work_dir: &Path) -> Result<(), Xerr> {
     Ok(())
 }
 
-fn get_saved_args(input: &Path) -> Result<Args, Xerr> {
-    let canonical = input.canonicalize()?;
+fn get_saved_args(args: &Args) -> Result<Args, Xerr> {
+    let canonical = args.input.canonicalize()?;
     let hash = hash_input(&canonical);
-    let work_dir = canonical.with_file_name(format!(".{}", &hash[..7]));
+    let work_dir_name = format!(".{}", &hash[..7]);
+    let work_dir = if let Some(ref t) = args.temp {
+        t.join(&work_dir_name)
+    } else {
+        canonical.with_file_name(&work_dir_name)
+    };
     let cmd_path = work_dir.join("cmd.txt");
 
     if cmd_path.exists() && get_resume(&work_dir).is_some_and(|r| !r.chnks_done.is_empty()) {
@@ -627,7 +641,12 @@ fn main_with_args(args: &Args) -> Result<(), Xerr> {
 
     let canonical_input = args.input.canonicalize()?;
     let hash = hash_input(&canonical_input);
-    let work_dir = canonical_input.with_file_name(format!(".{}", &hash[..7]));
+    let work_dir_name = format!(".{}", &hash[..7]);
+    let work_dir = if let Some(ref t) = args.temp {
+        t.join(&work_dir_name)
+    } else {
+        canonical_input.with_file_name(&work_dir_name)
+    };
 
     let is_new_encode = !work_dir.exists();
     create_dir_all(&work_dir)?;
