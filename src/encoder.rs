@@ -699,8 +699,6 @@ pub fn set_svt_config(config: *mut EbSvtAv1EncConfiguration, cfg: &EncConfig) {
         ("input-depth", "10"),
         ("color-format", "1"),
         ("profile", "0"),
-        ("tile-rows", "0"),
-        ("tile-columns", "0"),
         ("keyint", "0"),
         ("rc", "0"),
         ("scd", "0"),
