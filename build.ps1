@@ -422,7 +422,7 @@ else {
     else { git clone --depth 300 https://github.com/Uranite/ffms2.git }
     Push-Location ffms2
     Invoke-Step "Configuring FFMS2" {
-        cmake --fresh -B ffms2_build -G Ninja -DBUILD_SHARED_LIBS=OFF -DENABLE_AVISYNTH=OFF `
+        cmake -B ffms2_build -G Ninja -DBUILD_SHARED_LIBS=OFF -DENABLE_AVISYNTH=OFF `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_CXX_FLAGS_RELEASE="-flto -O3 -DNDEBUG -march=znver2" `
             -DCMAKE_C_FLAGS_RELEASE="-flto -O3 -DNDEBUG -march=znver2"
@@ -448,7 +448,7 @@ else {
 
 Write-Host ""
 Write-Host "Select SVT-AV1 variant to compile:"
-Write-Host "  1. svt-av1-hdr      (https://github.com/juliobbv-p/svt-av1-hdr)"
+Write-Host "  1. svt-av1-hdr       (https://github.com/juliobbv-p/svt-av1-hdr)"
 Write-Host "  2. 5fish             (https://github.com/Akatmks/5fish-svt-av1-psy-pr/tree/dlf-bias)"
 Write-Host "  3. svt-av1-essential (https://github.com/nekotrix/SVT-AV1-Essential/tree/Essential-v4.0.1)"
 Write-Host "  4. svt-av1-tritium yis branch [WARNING: DO NOT USE - testing only] (https://github.com/Uranite/svt-av1-tritium/tree/yis)"
@@ -521,7 +521,7 @@ else {
     else { git clone --depth 300 https://gitlab.xiph.org/xiph/opus.git }
     Push-Location opus
     Invoke-Step "Configuring Opus" {
-        cmake --fresh -B build -G Ninja `
+        cmake -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_C_FLAGS_RELEASE="-flto -O3 -DNDEBUG -march=znver2" `
             -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
@@ -574,25 +574,35 @@ $rustflags = @(
     '-C', 'embed-bitcode=yes',
     '-Z', 'dylib-lto',
     '-Z', 'panic_abort_tests',
-    '-C', 'target-feature=+crt-static'
+    '-C', 'target-feature=+crt-static',
+    '-C', 'link-arg=/OPT:REF',
+    '-C', 'link-arg=/OPT:ICF'
 )
 $rustflagsJson = '[' + (($rustflags | ForEach-Object { "'$_'" }) -join ', ') + ']'
 $cargoConfig = "build.rustflags=$rustflagsJson"
 
+$features = "static,vship,vcpkg"
+if ($vshipBackend -eq 'cuda') { $features += ",nvidia" }
+elseif ($vshipBackend -eq 'hip') { $features += ",amd" }
+
+if ($svtChoice -eq '2' -or $svtChoice -eq '5') {
+    $features += ",5fish"
+}
+
 switch ($vshipBackend) {
     'cuda' {
         Invoke-Step "Cargo build (CUDA)" {
-            cargo build --release --features "static,vship,nvidia,vcpkg" --config $cargoConfig
+            cargo build --release --features $features --config $cargoConfig
         }
     }
     'hip' {
         Invoke-Step "Cargo build (HIP)" {
-            cargo build --release --features "static,vship,amd,vcpkg" --config $cargoConfig
+            cargo build --release --features $features --config $cargoConfig
         }
     }
     'vulkan' {
         Invoke-Step "Cargo build (Vulkan)" {
-            cargo build --release --features "static,vship,vcpkg" --config $cargoConfig
+            cargo build --release --features $features --config $cargoConfig
         }
     }
 }
