@@ -105,6 +105,7 @@ fn build_asm() -> Result<(), Box<dyn Error + Send + Sync>> {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=lib");
     if cfg!(target_os = "windows") {
         build_windows();
     } else {
