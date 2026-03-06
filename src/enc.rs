@@ -2218,6 +2218,9 @@ fn drain_go(
 
 fn svt_handle(conf: *mut EbSvtAv1EncConfiguration) -> *mut EbComponentType {
     let mut handle: *mut EbComponentType = null_mut();
+    #[cfg(feature = "5fish")]
+    let ret = unsafe { svt_av1_enc_init_handle(&raw mut handle, null_mut(), conf) };
+    #[cfg(not(feature = "5fish"))]
     let ret = unsafe { svt_av1_enc_init_handle(&raw mut handle, conf) };
     if ret != EB_ERROR_NONE {
         cold_path();
