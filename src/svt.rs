@@ -24,8 +24,10 @@ pub struct EbBufferHeaderType {
     pub n_tick_count: u32,
     pub dts: i64,
     pub pts: i64,
+    #[cfg(not(feature = "5fish"))]
     pub temporal_layer_index: u8,
     pub qp: u32,
+    #[cfg(not(feature = "5fish"))]
     pub avg_qp: u32,
     pub pic_type: u32,
     pub luma_sse: u64,
@@ -84,6 +86,7 @@ struct FrameScaleEvts {
     resize_denoms: *mut u32,
 }
 
+#[cfg(not(feature = "5fish"))]
 #[repr(C)]
 #[allow(clippy::struct_field_names)]
 struct SFramePositions {
@@ -98,6 +101,8 @@ struct SFramePositions {
 pub struct EbSvtAv1EncConfiguration {
     enc_mode: i8,
     intra_period_length: i32,
+    #[cfg(feature = "5fish")]
+    min_intra_period_length: i32,
     intra_refresh_type: i32,
     hierarchical_levels: u32,
     pred_structure: u8,
@@ -109,9 +114,13 @@ pub struct EbSvtAv1EncConfiguration {
     frame_rate_denominator: u32,
     encoder_bit_depth: u32,
     encoder_color_format: i32,
+    #[cfg(feature = "5fish")]
+    high_dynamic_range_input: u8,
     profile: i32,
     tier: u32,
     level: u32,
+    #[cfg(feature = "5fish")]
+    color_description_present_flag: bool,
     color_primaries: i32,
     transfer_characteristics: i32,
     matrix_coefficients: i32,
@@ -119,6 +128,9 @@ pub struct EbSvtAv1EncConfiguration {
     mastering_display: MasteringDisplayInfo,
     content_light_level: ContentLightLevel,
     chroma_sample_position: i32,
+    #[cfg(feature = "5fish")]
+    rate_control_mode: u32,
+    #[cfg(not(feature = "5fish"))]
     rate_control_mode: u8,
     qp: u32,
     use_qp_file: bool,
@@ -153,11 +165,18 @@ pub struct EbSvtAv1EncConfiguration {
     enable_restoration_filtering: i32,
     enable_mfmv: i32,
     scene_change_detection: u32,
+    #[cfg(feature = "5fish")]
+    restricted_motion_vector: bool,
     tile_columns: i32,
     tile_rows: i32,
     look_ahead_distance: u32,
+    #[cfg(feature = "5fish")]
+    enable_tpl_la: u8,
     recode_loop: u32,
     screen_content_mode: u32,
+    #[cfg(feature = "5fish")]
+    enable_adaptive_quantization: u8,
+    #[cfg(not(feature = "5fish"))]
     aq_mode: u8,
     enable_tf: u8,
     enable_overlays: bool,
@@ -171,7 +190,15 @@ pub struct EbSvtAv1EncConfiguration {
     fast_decode: u8,
     sframe_dist: i32,
     sframe_mode: i32,
+    #[cfg(feature = "5fish")]
+    channel_id: u32,
+    #[cfg(feature = "5fish")]
+    active_channel_count: u32,
     level_of_parallelism: u32,
+    #[cfg(feature = "5fish")]
+    pin_threads: u32,
+    #[cfg(feature = "5fish")]
+    target_socket: i32,
     use_cpu_flags: u64,
     stat_report: u32,
     recon_enabled: bool,
@@ -187,35 +214,103 @@ pub struct EbSvtAv1EncConfiguration {
     lambda_scale_factors: [i32; FRAME_UPDATE_TYPES],
     enable_dg: bool,
     startup_mg_size: u8,
+    #[cfg(not(feature = "5fish"))]
     startup_qp_offset: i8,
     frame_scale_evts: FrameScaleEvts,
     enable_roi_map: bool,
+    #[cfg(not(feature = "5fish"))]
     tf_strength: u8,
     pub fgs_table: *mut c_void,
     enable_variance_boost: bool,
     variance_boost_strength: u8,
     variance_octile: u8,
+    #[cfg(feature = "5fish")]
+    enable_alt_curve: bool,
     sharpness: i8,
+    #[cfg(not(feature = "5fish"))]
     variance_boost_curve: u8,
+    #[cfg(feature = "5fish")]
+    extended_crf_qindex_offset: u8,
+    #[cfg(feature = "5fish")]
+    qp_scale_compress_strength: f64,
+    #[cfg(feature = "5fish")]
+    frame_luma_bias: u8,
     luminance_qp_bias: u8,
+    #[cfg(feature = "5fish")]
+    max_32_tx_size: bool,
+    #[cfg(not(feature = "5fish"))]
     lossless: bool,
+    #[cfg(not(feature = "5fish"))]
     avif: bool,
+    #[cfg(not(feature = "5fish"))]
     min_chroma_qm_level: u8,
+    #[cfg(not(feature = "5fish"))]
     max_chroma_qm_level: u8,
+    #[cfg(not(feature = "5fish"))]
     rtc: bool,
+    #[cfg(not(feature = "5fish"))]
     qp_scale_compress_strength: u8,
+    #[cfg(not(feature = "5fish"))]
     sframe_posi: SFramePositions,
+    #[cfg(not(feature = "5fish"))]
     sframe_qp: u8,
+    #[cfg(not(feature = "5fish"))]
     sframe_qp_offset: i8,
     adaptive_film_grain: bool,
+    #[cfg(not(feature = "5fish"))]
     max_tx_size: u8,
+    #[cfg(not(feature = "5fish"))]
     extended_crf_qindex_offset: u8,
+    #[cfg(feature = "5fish")]
+    tf_strength: u8,
+    #[cfg(feature = "5fish")]
+    kf_tf_strength: u8,
+    #[cfg(feature = "5fish")]
+    min_chroma_qm_level: u8,
+    #[cfg(feature = "5fish")]
+    max_chroma_qm_level: u8,
+    #[cfg(feature = "5fish")]
+    noise_norm_strength: u8,
     ac_bias: f64,
+    #[cfg(feature = "5fish")]
+    tx_bias: u8,
+    #[cfg(feature = "5fish")]
+    low_q_taper: bool,
+    #[cfg(feature = "5fish")]
+    sharp_tx: bool,
+    #[cfg(feature = "5fish")]
+    hbd_mds: u8,
+    #[cfg(feature = "5fish")]
+    complex_hvs: u8,
+    #[cfg(feature = "5fish")]
+    alt_ssim_tuning: bool,
+    #[cfg(feature = "5fish")]
+    filtering_noise_detection: u8,
+    #[cfg(feature = "5fish")]
+    auto_tiling: bool,
+    #[cfg(feature = "5fish")]
+    photon_noise_iso: u32,
+    #[cfg(feature = "5fish")]
+    enable_photon_noise_chroma: u8,
+    #[cfg(feature = "5fish")]
+    color_range_provided: bool,
+    #[cfg(feature = "5fish")]
+    chroma_grain: bool,
+    #[cfg(feature = "5fish")]
+    alt_tf_decay: bool,
     _padding: [u8; 128],
 }
 
 #[link(name = "SvtAv1Enc")]
 unsafe extern "C" {
+    #[cfg(feature = "5fish")]
+    pub fn svt_av1_enc_init_handle(
+        p_handle: *mut *mut EbComponentType,
+        p_app_data: *mut c_void,
+        config_ptr: *mut EbSvtAv1EncConfiguration,
+    ) -> i32;
+
+    #[cfg(not(feature = "5fish"))]
     pub fn svt_av1_enc_init_handle(
         p_handle: *mut *mut EbComponentType,
         config_ptr: *mut EbSvtAv1EncConfiguration,

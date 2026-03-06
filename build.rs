@@ -29,6 +29,7 @@ fn find_static_lib(primary_paths: &[String], lib_name: &str) {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=lib");
     if cfg!(target_os = "windows") {
         build_windows();
     } else {
