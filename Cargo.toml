@@ -18,6 +18,7 @@ vship = []
 nvidia = []
 amd = []
 vcpkg = []
+5fish = []
 
 [dependencies]
 libc = "0.2.185"
