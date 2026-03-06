@@ -1489,6 +1489,9 @@ fn drain_svt_packets(handle: *mut EbComponentType, out: &mut dyn Write, done: bo
 fn svt_handle() -> (*mut EbComponentType, EbSvtAv1EncConfiguration) {
     let mut handle: *mut EbComponentType = null_mut();
     let mut conf = unsafe { zeroed::<EbSvtAv1EncConfiguration>() };
+    #[cfg(feature = "5fish")]
+    let ret = unsafe { svt_av1_enc_init_handle(&raw mut handle, null_mut(), &raw mut config) };
+    #[cfg(not(feature = "5fish"))]
     let ret = unsafe { svt_av1_enc_init_handle(&raw mut handle, &raw mut conf) };
     if ret != EB_ERROR_NONE {
         fatal(format_args!("svt_av1_enc_init_handle failed: {ret}"));
