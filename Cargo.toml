@@ -19,6 +19,7 @@ svt-essential = []
 nvidia = []
 amd = []
 vcpkg = []
+5fish = []
 
 [build-dependencies]
 nasm-rs = { version = "0.3.2", features = ["parallel"] }
