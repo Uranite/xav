@@ -41,20 +41,20 @@ fn build_windows() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
     if !cfg!(feature = "static") {
-        println!("cargo:rustc-link-lib=ffms2");
         println!("cargo:rustc-link-lib=opusenc");
         println!("cargo:rustc-link-lib=opus");
         #[cfg(feature = "vship")]
         println!("cargo:rustc-link-lib=libvship");
         println!("cargo:rustc-link-lib=SvtAv1Enc");
+        println!("cargo:rustc-link-lib=vulkan-1");
     } else {
         let mut lib_path = PathBuf::from(&manifest_dir);
         lib_path.push("lib");
         println!("cargo:rustc-link-search=native={}", lib_path.display());
-        println!("cargo:rustc-link-lib=static=ffms2");
         println!("cargo:rustc-link-lib=static=opusenc");
         println!("cargo:rustc-link-lib=static=opus");
         println!("cargo:rustc-link-lib=static=SvtAv1Enc");
+        println!("cargo:rustc-link-lib=vulkan-1");
 
         #[cfg(feature = "vship")]
         {
@@ -64,22 +64,6 @@ fn build_windows() {
                      is selected. Please enable one, e.g., --features vship,amd (ignore if you're \
                      compiling with vulkan vship)"
                 );
-                println!(
-                    "cargo:warning=amd and nvidia feature not selected, defaulting to Vulkan."
-                );
-                match env::var("VULKAN_SDK") {
-                    Ok(vulkan_path) => {
-                        let vulkan_lib_path = std::path::Path::new(&vulkan_path).join("Lib");
-                        println!(
-                            "cargo:rustc-link-search=native={}",
-                            vulkan_lib_path.display()
-                        );
-                    }
-                    Err(_) => {
-                        println!("cargo:warning=VULKAN_SDK environment variable not set.");
-                    }
-                }
-                println!("cargo:rustc-link-lib=static=vulkan-1");
             }
 
             println!("cargo:rustc-link-lib=static=libvship");
@@ -129,32 +113,31 @@ fn build_windows() {
             );
 
             let libs = [
+                "swresample",
                 "avformat",
                 "avcodec",
-                "swscale",
-                "swresample",
                 "avutil",
-                "lzma",
                 "dav1d",
-                "bcrypt",
-                "zlib",
-                "libssl",
-                "libcrypto",
-                "iconv",
-                "libxml2",
-                "bz2",
+                // "lzma",
+                // "libssl",
+                // "libcrypto",
+                // "iconv",
+                // "libxml2",
+                // "bz2",
             ];
             for lib in libs {
                 println!("cargo:rustc-link-lib=static={}", lib);
             }
         }
-
-        let sys_libs = [
-            "bcrypt", "mfuuid", "strmiids", "advapi32", "crypt32", "user32", "ole32",
-        ];
-        for lib in sys_libs {
-            println!("cargo:rustc-link-lib={}", lib);
-        }
+        println!("cargo:rustc-link-lib=bcrypt");
+        // non-minimal ffmpeg and static vulkan
+        // let sys_libs = [
+        //     "bcrypt", "mfuuid", "strmiids", "advapi32", "crypt32", "user32", "ole32",
+        //     "cfgmgr32", "setupapi", "gdi32", "shlwapi",
+        // ];
+        // for lib in sys_libs {
+        //     println!("cargo:rustc-link-lib={}", lib);
+        // }
     }
 }
 
