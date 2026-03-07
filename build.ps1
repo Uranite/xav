@@ -2,10 +2,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# ============================================================
-#  Helper Functions
-# ============================================================
-
 function Invoke-Step {
     param([string]$Label, [scriptblock]$Action)
     Write-Host "[INFO] $Label..." -ForegroundColor Cyan
@@ -17,14 +13,13 @@ function Invoke-Step {
     }
 }
 
-# Refreshes PATH and common SDK env vars from the registry into the current session,
-# so tools installed by winget are immediately usable without restarting the terminal.
+# Refresh PATH and SDK env vars from registry so newly installed tools are usable immediately.
 function Update-SessionEnvironment {
     $machinePath = [System.Environment]::GetEnvironmentVariable('PATH', 'Machine')
     $userPath = [System.Environment]::GetEnvironmentVariable('PATH', 'User')
     $env:PATH = "$machinePath;$userPath"
 
-    foreach ($var in @('CUDA_PATH', 'HIP_PATH', 'VULKAN_SDK', 'VCPKG_ROOT')) {
+    foreach ($var in @('CUDA_PATH', 'HIP_PATH', 'VULKAN_SDK')) {
         $val = [System.Environment]::GetEnvironmentVariable($var, 'Machine')
         if (-not $val) { $val = [System.Environment]::GetEnvironmentVariable($var, 'User') }
         if ($val) { Set-Item "env:$var" $val }
@@ -57,10 +52,6 @@ function Confirm-Install {
     Write-Host "[INFO] $AppName installed successfully." -ForegroundColor Green
 }
 
-# ============================================================
-#  Backend Selection
-# ============================================================
-
 Write-Host "Select Vship backend to compile:"
 Write-Host "  1. CUDA"
 Write-Host "  2. HIP"
@@ -79,13 +70,8 @@ switch ($vshipChoice) {
     }
 }
 
-# Set clang as the default C/C++ compiler for all builds
 $env:CC = 'clang'
 $env:CXX = 'clang++'
-
-# ============================================================
-#  System Dependencies
-# ============================================================
 
 Write-Host "[INFO] Checking basic system dependencies..." -ForegroundColor Cyan
 
@@ -115,7 +101,10 @@ if (-not (Assert-Command 'cargo')) {
     }
 }
 
-# Ensure nightly toolchain is active
+if (-not (Test-Path 'C:\msys64\usr\bin\bash.exe')) {
+    Confirm-Install "MSYS2" "MSYS2.MSYS2"
+}
+
 Write-Host "[INFO] Setting Rust toolchain to nightly..." -ForegroundColor Cyan
 rustup default nightly
 if ($LASTEXITCODE -ne 0) {
@@ -124,10 +113,8 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# Visual Studio Build Tools
-# vswhere.exe can exist independently of VS Build Tools (it ships with the VS installer),
-# so we must check that vswhere actually finds an installation with C++ tools, not just
-# that the file exists.
+# vswhere ships with the VS installer independently of the build tools themselves,
+# so check that it actually finds an installation with C++ tools.
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $hasCppTools = (Test-Path $vswhere) -and
 (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null)
@@ -146,15 +133,13 @@ if (-not $hasCppTools) {
     $vsWingetArgs = "--quiet --wait --norestart $vsWorkloadComponents"
     $vsModifyArgs = "--quiet --norestart $vsWorkloadComponents"
 
-    # First try a fresh winget install (works when VS Build Tools are not installed at all).
     # --override forwards args directly to the VS bootstrapper, bypassing winget's defaults.
     winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget `
         --accept-source-agreements --accept-package-agreements `
         --override $vsWingetArgs
 
     if ($LASTEXITCODE -ne 0) {
-        # winget refuses to reinstall an already-present package. Fall back to running
-        # the existing VS installer directly in modify mode to add the missing workload.
+        # winget refuses to reinstall an existing package; fall back to modify mode.
         Write-Host "[INFO] VS Build Tools already installed. Modifying existing installation to add C++ workload..." -ForegroundColor Cyan
         $vsInstallerPath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
         if (-not (Test-Path $vsInstallerPath)) {
@@ -162,9 +147,8 @@ if (-not $hasCppTools) {
             Read-Host "Press Enter to exit"
             exit 1
         }
-        # 'modify' updates the existing installation without a full reinstall.
         $existingInstallPath = & $vswhere -latest -products * -property installationPath
-        # -Verb RunAs elevates only this specific call since the script itself does not run as admin.
+        # Elevate only this call; the script itself does not require admin.
         Start-Process -FilePath $vsInstallerPath `
             -ArgumentList "modify --installPath `"$existingInstallPath`" $vsModifyArgs" `
             -Verb RunAs -Wait
@@ -178,7 +162,6 @@ if (-not $hasCppTools) {
     Write-Host "[INFO] Visual Studio Build Tools with C++ workload installed successfully." -ForegroundColor Green
 }
 
-# Backend-specific SDKs
 if ($vshipBackend -eq 'cuda' -and -not $env:CUDA_PATH) {
     Confirm-Install "NVIDIA CUDA Toolkit" "Nvidia.CUDA"
     if (-not $env:CUDA_PATH) {
@@ -202,7 +185,8 @@ if ($vshipBackend -eq 'hip' -and -not $env:HIP_PATH) {
     }
 }
 
-if ($vshipBackend -eq 'vulkan' -and -not $env:VULKAN_SDK) {
+# Vulkan SDK is always required - FFmpeg uses Vulkan decode hwaccels regardless of backend.
+if (-not $env:VULKAN_SDK) {
     Confirm-Install "Vulkan SDK" "KhronosGroup.VulkanSDK"
     if (-not $env:VULKAN_SDK) {
         Write-Host "[ERROR] VULKAN_SDK still not set after install. Try restarting your PC." -ForegroundColor Red
@@ -212,49 +196,17 @@ if ($vshipBackend -eq 'vulkan' -and -not $env:VULKAN_SDK) {
 }
 
 # ============================================================
-#  vcpkg
+#  MSYS2 Dependencies
 # ============================================================
 
-# Check VCPKG_ROOT first to respect an existing install anywhere on the system,
-# then fall back to C:\vcpkg, and only prompt to install if neither exists.
-if ($env:VCPKG_ROOT -and (Test-Path "$env:VCPKG_ROOT\vcpkg.exe")) {
-    Write-Host "[INFO] Found existing vcpkg at $env:VCPKG_ROOT" -ForegroundColor Cyan
-}
-elseif (Test-Path 'C:\vcpkg\vcpkg.exe') {
-    Write-Host "[INFO] Found existing vcpkg at C:\vcpkg" -ForegroundColor Cyan
-    $env:VCPKG_ROOT = 'C:\vcpkg'
-}
-else {
-    Write-Host ""
-    Write-Host "[PROMPT] vcpkg is not installed." -ForegroundColor Yellow
-    $choice = Read-Host "Do you want to install it to C:\vcpkg? (Y/N) [Default: Y]"
-    if ($choice -ieq 'N') {
-        Write-Host "[ERROR] vcpkg is required. Please install it manually and set VCPKG_ROOT." -ForegroundColor Red
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
-    Write-Host "[INFO] Installing vcpkg to C:\vcpkg..." -ForegroundColor Cyan
-    if (-not (Test-Path 'C:\vcpkg')) {
-        git clone --depth 300 https://github.com/microsoft/vcpkg.git C:\vcpkg
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "[ERROR] Failed to clone vcpkg." -ForegroundColor Red
-            Read-Host "Press Enter to exit"
-            exit 1
-        }
-    }
-    & C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[ERROR] vcpkg bootstrap failed." -ForegroundColor Red
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
-    [System.Environment]::SetEnvironmentVariable('VCPKG_ROOT', 'C:\vcpkg', 'User')
-    Write-Host "[INFO] VCPKG_ROOT set to C:\vcpkg" -ForegroundColor Green
-    $env:VCPKG_ROOT = 'C:\vcpkg'
+$msysExe = 'C:\msys64\usr\bin\bash.exe'
+
+Invoke-Step "Installing MSYS2 base dependencies" {
+    & $msysExe -lc "pacman --noconfirm -S --needed autoconf automake libtool base-devel pkg-config"
 }
 
 # ============================================================
-#  Locate Visual Studio (vcvars64 will be invoked only for msbuild)
+#  Locate Visual Studio
 # ============================================================
 
 $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -264,67 +216,6 @@ if (-not $vsPath) {
     exit 1
 }
 $vcvarsScript = "$vsPath\VC\Auxiliary\Build\vcvars64.bat"
-
-function Invoke-WithMsvc {
-    param([string]$Label, [scriptblock]$Action)
-
-    # Save the entire current process environment
-    $savedEnv = @{}
-    foreach ($key in [System.Environment]::GetEnvironmentVariables('Process').Keys) {
-        $savedEnv[$key] = [System.Environment]::GetEnvironmentVariable($key, 'Process')
-    }
-
-    # Runs a command inside an MSVC environment sourced from vcvars64.
-    $vcvarsCmd = "`"$vcvarsScript`""
-    # Reset PATH to system essentials before invoking cmd, because the accumulated
-    # PATH from all tool installs can exceed cmd's 8191 char limit and cause
-    # 'input line is too long'. vcvars64 will rebuild PATH correctly anyway.
-    $savedPath = $env:PATH
-    $minPath = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
-    $envDump = cmd /c "set PATH=$minPath && $vcvarsCmd && set"
-    foreach ($line in $envDump) {
-        if ($line -match '^([^=]+)=(.*)$') {
-            [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
-        }
-    }
-    # Restore our full PATH (with all installed tools) on top of what vcvars set
-    $env:PATH = $env:PATH + ';' + $savedPath
-
-    if (-not (Assert-Command 'cl.exe')) {
-        Write-Host "[ERROR] MSVC cl.exe not found after vcvars setup." -ForegroundColor Red
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
-
-    try {
-        Invoke-Step $Label $Action
-    }
-    finally {
-        # Restore original environment variables
-        foreach ($key in [System.Environment]::GetEnvironmentVariables('Process').Keys) {
-            if (-not $savedEnv.Contains($key)) {
-                [System.Environment]::SetEnvironmentVariable($key, $null, 'Process')
-            }
-        }
-        foreach ($key in $savedEnv.Keys) {
-            [System.Environment]::SetEnvironmentVariable($key, $savedEnv[$key], 'Process')
-        }
-    }
-}
-
-# ============================================================
-#  vcpkg Dependencies
-# ============================================================
-
-Write-Host "[INFO] Installing required vcpkg dependencies..." -ForegroundColor Cyan
-& "$env:VCPKG_ROOT\vcpkg.exe" install 'ffmpeg[avcodec,avdevice,avfilter,avformat,swresample,swscale,zlib,bzip2,core,dav1d,gpl,version3,lzma,openssl,xml2]:x64-windows-static'
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] vcpkg install failed." -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-
 
 # ============================================================
 #  Compile Vship
@@ -350,9 +241,7 @@ else {
                 Write-Host "[ERROR] CUDA_PATH not set." -ForegroundColor Red
                 Pop-Location; Read-Host "Press Enter to exit"; exit 1
             }
-            # nvcc uses cl.exe as its host compiler. Detect the v143 (MSVC 14.4x)
-            # toolset path so we can pass it via -ccbin, ensuring the correct
-            # compiler is used even if v145 is the default on this machine.
+            # Pin nvcc to the v143 (14.4x) host compiler via -ccbin in case v145 is the default.
             $msvcV143Bin = Get-ChildItem "$vsPath\VC\Tools\MSVC\14.4*\bin\HostX64\x64" `
                 -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName
             if (-not $msvcV143Bin) {
@@ -410,80 +299,26 @@ else {
     Pop-Location
 }
 
-# ============================================================
-#  Compile FFMS2
-# ============================================================
-
-if (Test-Path 'ffms2\lib\ffms2.lib') {
-    Write-Host "[INFO] FFMS2 already compiled. Skipping..." -ForegroundColor Cyan
-}
-else {
-    if (Test-Path 'ffms2') { Push-Location ffms2; git pull; Pop-Location }
-    else { git clone --depth 300 https://github.com/Uranite/ffms2.git }
-    Push-Location ffms2
-    Invoke-Step "Configuring FFMS2" {
-        cmake -B ffms2_build -G Ninja -DBUILD_SHARED_LIBS=OFF -DENABLE_AVISYNTH=OFF `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_CXX_FLAGS_RELEASE="-flto -O3 -DNDEBUG -march=znver2" `
-            -DCMAKE_C_FLAGS_RELEASE="-flto -O3 -DNDEBUG -march=znver2"
-    }
-    Invoke-Step "Building FFMS2" { ninja -C ffms2_build }
-    Pop-Location
-    if (-not (Test-Path 'ffms2\lib')) { New-Item -ItemType Directory 'ffms2\lib' | Out-Null }
-    Copy-Item ffms2\ffms2_build\ffms2.lib ffms2\lib\ -Force
-
-    $ffmsLib = "$PWD\ffms2\lib"
-    $ffmsInclude = "$PWD\ffms2\include"
-    $env:FFMS_LIB_DIR = $ffmsLib
-    $env:FFMS_INCLUDE_DIR = $ffmsInclude
-    [System.Environment]::SetEnvironmentVariable('FFMS_LIB_DIR', $ffmsLib, 'User')
-    [System.Environment]::SetEnvironmentVariable('FFMS_INCLUDE_DIR', $ffmsInclude, 'User')
-    Write-Host "[INFO] FFMS_LIB_DIR set to $ffmsLib" -ForegroundColor Green
-    Write-Host "[INFO] FFMS_INCLUDE_DIR set to $ffmsInclude" -ForegroundColor Green
-}
-
-# ============================================================
-#  SVT-AV1 Variant Selection
-# ============================================================
-
 Write-Host ""
 Write-Host "Select SVT-AV1 variant to compile:"
 Write-Host "  1. svt-av1-hdr       (https://github.com/juliobbv-p/svt-av1-hdr)"
-Write-Host "  2. 5fish             (https://github.com/Akatmks/5fish-svt-av1-psy-pr/tree/dlf-bias)"
+Write-Host "  2. svt-av1-tritium yis branch [WARNING: DO NOT USE - testing only] (https://github.com/Uranite/svt-av1-tritium/tree/yis)"
 Write-Host "  3. svt-av1-essential (https://github.com/nekotrix/SVT-AV1-Essential/tree/Essential-v4.0.1)"
-Write-Host "  4. svt-av1-tritium yis branch [WARNING: DO NOT USE - testing only] (https://github.com/Uranite/svt-av1-tritium/tree/yis)"
+Write-Host "  4. 5fish             (https://github.com/Akatmks/5fish-svt-av1-psy-pr/tree/dlf-bias)"
 $svtChoice = Read-Host "Enter choice (1-4) [Default: 1]"
 if (-not $svtChoice) { $svtChoice = '1' }
 
 switch ($svtChoice) {
     '1' { $svtVariant = 'svt-av1-hdr'; $svtRepo = 'https://github.com/juliobbv-p/svt-av1-hdr.git'; $svtBranch = ''; $svtDir = 'svt-av1-hdr'; $svtExtraCFlags = '' }
-    '2' { $svtVariant = '5fish'; $svtRepo = 'https://github.com/Akatmks/5fish-svt-av1-psy-pr.git'; $svtBranch = 'dlf-bias'; $svtDir = '5fish-svt-av1-psy-pr'; $svtExtraCFlags = ' -DSVT_LOG_QUIET' }
+    '2' { $svtVariant = 'svt-av1-tritium-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = 'yis'; $svtDir = 'svt-av1-tritium'; $svtExtraCFlags = '' }
     '3' { $svtVariant = 'svt-av1-essential'; $svtRepo = 'https://github.com/nekotrix/SVT-AV1-Essential.git'; $svtBranch = 'Essential-v4.0.1'; $svtDir = 'SVT-AV1-Essential'; $svtExtraCFlags = '' }
-    '4' {
-        $svtVariant = 'svt-av1-tritium-yis'
-        $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'
-        $svtBranch = 'yis'
-        $svtDir = 'svt-av1-tritium'
-        $svtExtraCFlags = ''
-        Write-Host ""
-        Write-Host "[WARNING] svt-av1-tritium yis branch is for testing only. DO NOT USE for production." -ForegroundColor Red
-        $confirm = Read-Host "Are you sure you want to continue? (Y/N) [Default: N]"
-        if ($confirm -ine 'Y') {
-            Write-Host "[INFO] Aborting. Please re-run and select a different variant." -ForegroundColor Yellow
-            Read-Host "Press Enter to exit"
-            exit 0
-        }
-    }
+    '4' { $svtVariant = '5fish'; $svtRepo = 'https://github.com/Akatmks/5fish-svt-av1-psy-pr.git'; $svtBranch = 'dlf-bias'; $svtDir = '5fish-svt-av1-psy-pr'; $svtExtraCFlags = ' -DSVT_LOG_QUIET' }
     default {
         Write-Host "[ERROR] Invalid choice." -ForegroundColor Red
         Read-Host "Press Enter to exit"
         exit 1
     }
 }
-
-# ============================================================
-#  Compile SVT-AV1
-# ============================================================
 
 if (Test-Path $svtDir) {
     Push-Location $svtDir; git pull; Pop-Location
@@ -509,10 +344,6 @@ Pop-Location
 if (-not (Test-Path 'lib')) { New-Item -ItemType Directory 'lib' | Out-Null }
 Copy-Item $svtDir\Bin\Release\SvtAv1Enc.lib lib\ -Force
 
-# ============================================================
-#  Compile Opus
-# ============================================================
-
 if (Test-Path 'lib\opus.lib') {
     Write-Host "[INFO] Opus already compiled. Skipping..." -ForegroundColor Cyan
 }
@@ -523,7 +354,7 @@ else {
     Invoke-Step "Configuring Opus" {
         cmake -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_C_FLAGS_RELEASE="-flto -O3 -DNDEBUG -march=znver2" `
+            -DCMAKE_C_FLAGS_RELEASE="-flto -O3 -DNDEBUG -march=native" `
             -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
     }
     Invoke-Step "Building Opus" { ninja -C build }
@@ -532,30 +363,289 @@ else {
     Copy-Item opus\build\opus.lib lib\ -Force
 }
 
-# ============================================================
-#  Compile libopusenc
-# ============================================================
-
 if (Test-Path 'lib\opusenc.lib') {
     Write-Host "[INFO] libopusenc already compiled. Skipping..." -ForegroundColor Cyan
 }
 else {
     if (Test-Path 'libopusenc') { Push-Location libopusenc; git pull; Pop-Location }
     else { git clone --depth 300 https://gitlab.xiph.org/xiph/libopusenc.git }
-    Push-Location libopusenc\win32\VS2015
-    # Build the static lib project explicitly. The default solution builds a DLL
-    # which produces only a small import .lib rather than a full static archive.
-    # WholeProgramOptimization is disabled to avoid LTO conflicts with clang-compiled libs.
-    Invoke-WithMsvc "Building libopusenc (static)" {
-        msbuild opusenc.vcxproj /p:Configuration=Release /p:Platform=x64 `
-            /p:ConfigurationType=StaticLibrary `
-            /p:RuntimeLibrary=MultiThreaded `
-            /p:WholeProgramOptimization=false `
-            /p:PlatformToolset=$msbuildToolset
+    Push-Location libopusenc
+    $msysExe = 'C:\msys64\usr\bin\bash.exe'
+    Invoke-Step "Building libopusenc (MSYS2)" {
+        $bashScript = @"
+#!/bin/sh
+set -e
+./autogen.sh
+./configure CC="clang" CXX="clang++" \
+    CFLAGS="-target x86_64-pc-windows-msvc -O3 -flto -fuse-ld=lld -march=native" \
+    LDFLAGS="-target x86_64-pc-windows-msvc -fuse-ld=lld" \
+    AR="llvm-ar" RANLIB="llvm-ranlib" \
+    DEPS_CFLAGS="-I../opus/include" \
+    DEPS_LIBS="-L../lib -lopus" \
+    --enable-static --disable-shared
+make clean
+make -j`$(nproc)
+"@
+        Set-Content -Path 'build_in_msys.sh' -Value $bashScript -Encoding Ascii
+        $env:MSYS2_PATH_TYPE = 'inherit'
+        $unixPath = $PWD.Path -replace '\\', '/'
+        & $msysExe -lc "cd `"$unixPath`" && sh ./build_in_msys.sh"
     }
     Pop-Location
     if (-not (Test-Path 'lib')) { New-Item -ItemType Directory 'lib' | Out-Null }
-    Copy-Item libopusenc\win32\VS2015\x64\Release\opusenc.lib lib\ -Force
+    
+    if (Test-Path 'libopusenc\.libs\opusenc.lib') {
+        Copy-Item 'libopusenc\.libs\opusenc.lib' 'lib\opusenc.lib' -Force
+    }
+    else {
+        Write-Host "[ERROR] Could not find compiled opusenc.lib output." -ForegroundColor Red
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
+}
+
+# ============================================================
+#  Compile Vulkan, dav1d, FFmpeg
+# ============================================================
+$msysExe = 'C:\msys64\usr\bin\bash.exe'
+
+if (-not (Test-Path 'lib')) { New-Item -ItemType Directory 'lib' | Out-Null }
+
+if (Test-Path 'lib\vulkan-1.lib') {
+    Write-Host "[INFO] Vulkan already compiled. Skipping..." -ForegroundColor Cyan
+}
+else {
+    if (-not (Test-Path 'vulkan')) { New-Item -ItemType Directory 'vulkan' | Out-Null }
+    Push-Location vulkan
+
+    if (Test-Path 'Vulkan-Headers') { Push-Location 'Vulkan-Headers'; git pull; Pop-Location }
+    else { git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git }
+
+    Invoke-Step "Configuring Vulkan Headers" {
+        cmake -S Vulkan-Headers -B Vulkan-Headers/build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX="$PWD/install" `
+            -DCMAKE_C_FLAGS_RELEASE="-flto -O3 -DNDEBUG -march=native" `
+            -DCMAKE_CXX_FLAGS_RELEASE="-flto -O3 -DNDEBUG -march=native"
+    }
+    Invoke-Step "Installing Vulkan Headers" {
+        ninja -C Vulkan-Headers/build install
+    }
+
+    if (Test-Path 'Vulkan-Loader') { Push-Location 'Vulkan-Loader'; git pull; Pop-Location }
+    else { git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Loader.git }
+
+    $ml64 = Get-ChildItem "$vsPath\VC\Tools\MSVC" |
+    Sort-Object Name -Descending | Select-Object -First 1 |
+    ForEach-Object { "$($_.FullName)\bin\HostX64\x64\ml64.exe" }
+
+    Invoke-Step "Building Vulkan Loader" {
+        cmake -S Vulkan-Loader -B Vulkan-Loader/build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX="$PWD/install" `
+            -DBUILD_SHARED_LIBS=ON `
+            "-DCMAKE_ASM_MASM_COMPILER=$ml64" `
+            -DVULKAN_HEADERS_INSTALL_DIR="$PWD/install" `
+            -DCMAKE_C_FLAGS_RELEASE="-flto -O3 -DNDEBUG -march=native"
+        ninja -C Vulkan-Loader/build
+        ninja -C Vulkan-Loader/build install
+    }
+
+    Pop-Location
+
+    Copy-Item 'vulkan\install\lib\vulkan-1.lib' 'lib\vulkan-1.lib' -Force
+}
+
+# dav1d
+if (Test-Path 'lib\dav1d.lib') {
+    Write-Host "[INFO] dav1d already compiled. Skipping..." -ForegroundColor Cyan
+}
+else {
+    if (Test-Path 'dav1d') { Push-Location dav1d; git pull; Pop-Location }
+    else { git clone --depth 300 https://code.videolan.org/videolan/dav1d.git }
+    Push-Location dav1d
+    if (-not (Assert-Command 'meson')) {
+        Invoke-Step "Installing meson via pip" {
+            pip install meson
+        }
+    }
+    if (-not (Assert-Command 'nasm')) {
+        Confirm-Install "NASM" "NetwideStudios.NASM"
+    }
+    Invoke-Step "Building dav1d" {
+        meson setup build --default-library=static --buildtype=release -Db_vscrt=mt -Db_lto=true -Doptimization=3 -Denable_tools=false -Denable_examples=false -Dbitdepths="8,16" -Denable_asm=true "-Dc_args=-O3 -DNDEBUG -march=native -fuse-ld=lld" "-Dc_link_args=-O3 -DNDEBUG -march=native -fuse-ld=lld"
+        ninja -C build
+    }
+    Pop-Location
+    Copy-Item dav1d\build\src\libdav1d.a lib\dav1d.lib -Force
+}
+
+$msvcLibPath = Get-ChildItem "$vsPath\VC\Tools\MSVC" |
+Sort-Object Name -Descending | Select-Object -First 1 |
+ForEach-Object { "$($_.FullName)\lib\x64" }
+
+$sdkVersion = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots' `
+        -Name KitsRoot10 -ErrorAction SilentlyContinue) | ForEach-Object {
+    Get-ChildItem "$($_.KitsRoot10)lib" | Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty Name
+}
+$sdkRoot = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots').KitsRoot10
+$sdkLibUm = "$sdkRoot\lib\$sdkVersion\um\x64"
+$sdkLibUcrt = "$sdkRoot\lib\$sdkVersion\ucrt\x64"
+$msvcLibPathShort = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($msvcLibPath).ShortPath
+$sdkLibUmShort = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($sdkLibUm).ShortPath
+$sdkLibUcrtShort = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($sdkLibUcrt).ShortPath
+$msvcLibPathUnix = $msvcLibPathShort -replace '\\', '/'
+$sdkLibUmUnix = $sdkLibUmShort -replace '\\', '/'
+$sdkLibUcrtUnix = $sdkLibUcrtShort -replace '\\', '/'
+
+# FFmpeg
+if (Test-Path 'lib\avcodec.lib') {
+    Write-Host "[INFO] FFmpeg already compiled. Skipping..." -ForegroundColor Cyan
+}
+else {
+    if (Test-Path 'FFmpeg') { Push-Location FFmpeg; git pull; Pop-Location }
+    else { git clone --depth 300 https://github.com/FFmpeg/FFmpeg.git }
+    Push-Location FFmpeg
+    Invoke-Step "Building FFmpeg (MSYS2 Inherit)" {
+        $bashScript = @"
+#!/bin/sh
+set -e
+export PKG_CONFIG_PATH="`$(pwd)/../dav1d/build/meson-private:`$(pwd)/../vulkan/install/lib/pkgconfig"
+sed -i "s|^prefix=.*|prefix=`$(pwd)/../dav1d/build|" `$(pwd)/../dav1d/build/meson-private/dav1d.pc
+
+sed -i 's/if test "`$cc_type" = "clang"; then/if true; then/' configure
+sed -i 's/test "`$cc_type" != "`$ld_type" && die "LTO requires same compiler and linker"/true/' configure
+./configure \
+    --cc="clang-cl" \
+    --cxx="clang-cl" \
+    --ld="lld-link" \
+    --ar="llvm-ar" \
+    --ranlib="llvm-ranlib" \
+    --nm="llvm-nm" \
+    --strip="llvm-strip" \
+    --toolchain="msvc" \
+    --enable-lto \
+    --extra-cflags="-flto -DNDEBUG -march=native /clang:-O3 -I`$(pwd)/../dav1d/include -I`$(pwd)/../dav1d/build/include -I`$(pwd)/../vulkan/install/include" \
+    --extra-ldflags="-LIBPATH:`$(pwd)/../lib \"-LIBPATH:$msvcLibPathUnix\" \"-LIBPATH:$sdkLibUmUnix\" \"-LIBPATH:$sdkLibUcrtUnix\"" \
+    --extra-libs="dav1d.lib vulkan-1.lib" \
+    --disable-shared \
+    --enable-static \
+    --pkg-config-flags="--static" \
+    --disable-programs \
+    --disable-doc \
+    --disable-htmlpages \
+    --disable-manpages \
+    --disable-podpages \
+    --disable-txtpages \
+    --disable-network \
+    --disable-autodetect \
+    --disable-all \
+    --disable-everything \
+    --enable-avcodec \
+    --enable-avformat \
+    --enable-avutil \
+    --enable-swscale \
+    --enable-swresample \
+    --enable-protocol=file \
+    --enable-demuxer=matroska \
+    --enable-demuxer=mov \
+    --enable-demuxer=mpegts \
+    --enable-demuxer=mpegps \
+    --enable-demuxer=flv \
+    --enable-demuxer=avi \
+    --enable-demuxer=ivf \
+    --enable-demuxer=yuv4mpegpipe \
+    --enable-demuxer=h264 \
+    --enable-demuxer=hevc \
+    --enable-demuxer=vvc \
+    --enable-decoder=rawvideo \
+    --enable-decoder=h264 \
+    --enable-decoder=hevc \
+    --enable-decoder=mpeg2video \
+    --enable-decoder=mpeg1video \
+    --enable-decoder=mpeg4 \
+    --enable-decoder=av1 \
+    --enable-decoder=libdav1d \
+    --enable-decoder=vp9 \
+    --enable-decoder=vc1 \
+    --enable-decoder=vvc \
+    --enable-decoder=aac \
+    --enable-decoder=aac_latm \
+    --enable-decoder=ac3 \
+    --enable-decoder=eac3 \
+    --enable-decoder=dca \
+    --enable-decoder=truehd \
+    --enable-decoder=mlp \
+    --enable-decoder=mp1 \
+    --enable-decoder=mp1float \
+    --enable-decoder=mp2 \
+    --enable-decoder=mp2float \
+    --enable-decoder=mp3 \
+    --enable-decoder=mp3float \
+    --enable-decoder=opus \
+    --enable-decoder=vorbis \
+    --enable-decoder=flac \
+    --enable-decoder=alac \
+    --enable-decoder=ape \
+    --enable-decoder=tak \
+    --enable-decoder=tta \
+    --enable-decoder=wavpack \
+    --enable-decoder=wmalossless \
+    --enable-decoder=wmapro \
+    --enable-decoder=wmav1 \
+    --enable-decoder=wmav2 \
+    --enable-decoder=mpc7 \
+    --enable-decoder=mpc8 \
+    --enable-decoder=dsd_lsbf \
+    --enable-decoder=dsd_lsbf_planar \
+    --enable-decoder=dsd_msbf \
+    --enable-decoder=dsd_msbf_planar \
+    --enable-decoder=pcm_s16le \
+    --enable-decoder=pcm_s16be \
+    --enable-decoder=pcm_s24le \
+    --enable-decoder=pcm_s24be \
+    --enable-decoder=pcm_s32le \
+    --enable-decoder=pcm_s32be \
+    --enable-decoder=pcm_f32le \
+    --enable-decoder=pcm_f32be \
+    --enable-decoder=pcm_f64le \
+    --enable-decoder=pcm_f64be \
+    --enable-decoder=pcm_bluray \
+    --enable-decoder=pcm_dvd \
+    --enable-libdav1d \
+    --enable-parser=h264 \
+    --enable-parser=hevc \
+    --enable-parser=mpeg4video \
+    --enable-parser=mpegvideo \
+    --enable-parser=av1 \
+    --enable-parser=vp9 \
+    --enable-parser=vvc \
+    --enable-parser=vc1 \
+    --enable-parser=aac \
+    --enable-parser=ac3 \
+    --enable-parser=dca \
+    --enable-parser=mpegaudio \
+    --enable-parser=opus \
+    --enable-parser=vorbis \
+    --enable-parser=flac \
+    --enable-vulkan \
+    --enable-hwaccel=h264_vulkan \
+    --enable-hwaccel=hevc_vulkan \
+    --enable-hwaccel=av1_vulkan \
+    --enable-hwaccel=vp9_vulkan
+make -j`$(nproc)
+"@
+        Set-Content -Path 'build_ffmpeg.sh' -Value $bashScript -Encoding Ascii
+        $env:MSYS2_PATH_TYPE = 'inherit'
+        $unixPath = $PWD.Path -replace '\\', '/'
+        & $msysExe -lc "cd `"$unixPath`" && sh ./build_ffmpeg.sh"
+    }
+    Pop-Location
+    Copy-Item 'FFmpeg\libavcodec\avcodec.lib' 'lib\avcodec.lib' -Force
+    Copy-Item 'FFmpeg\libavformat\avformat.lib' 'lib\avformat.lib' -Force
+    Copy-Item 'FFmpeg\libavutil\avutil.lib' 'lib\avutil.lib' -Force
+    Copy-Item 'FFmpeg\libswresample\swresample.lib' 'lib\swresample.lib' -Force
+    Copy-Item 'FFmpeg\libswscale\swscale.lib' 'lib\swscale.lib' -Force
 }
 
 # ============================================================
@@ -581,11 +671,11 @@ $rustflags = @(
 $rustflagsJson = '[' + (($rustflags | ForEach-Object { "'$_'" }) -join ', ') + ']'
 $cargoConfig = "build.rustflags=$rustflagsJson"
 
-$features = "static,vship,vcpkg"
+$features = "static,vship"
 if ($vshipBackend -eq 'cuda') { $features += ",nvidia" }
 elseif ($vshipBackend -eq 'hip') { $features += ",amd" }
 
-if ($svtChoice -eq '2' -or $svtChoice -eq '5') {
+if ($svtChoice -eq '4') {
     $features += ",5fish"
 }
 
@@ -608,5 +698,8 @@ switch ($vshipBackend) {
 }
 
 Write-Host ""
+if (-not (Test-Path 'target\release')) { New-Item -ItemType Directory 'target\release' | Out-Null }
+Copy-Item 'vulkan\install\bin\vulkan-1.dll' 'target\release\vulkan-1.dll' -Force
+
 Write-Host "[SUCCESS] Build script finished." -ForegroundColor Green
 Read-Host "Press Enter to exit"
