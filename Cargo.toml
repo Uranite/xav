@@ -30,9 +30,6 @@ sonic-rs = "0.5.7"
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"
 
-[patch.crates-io]
-av-decoders = { git = "https://github.com/rust-av/av-decoders" }
-
 [build-dependencies]
 vcpkg = "0.2"
 
