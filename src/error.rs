@@ -123,11 +123,17 @@ pub fn signal(sig: i32, handler: usize) {
 
 #[cold]
 #[inline(never)]
-pub fn fatal<E: Display>(e: E) -> ! {
-    if IN_ALT_SCREEN.load(Relaxed) {
+pub fn restore_screen() {
+    if IN_ALT_SCREEN.swap(false, Relaxed) {
         print!("\x1b[?25h\x1b[?1049l");
         _ = stdout().flush();
     }
+}
+
+#[cold]
+#[inline(never)]
+pub fn fatal<E: Display>(e: E) -> ! {
+    restore_screen();
     _ = writeln!(stderr(), "{e}");
     exit(1)
 }
@@ -135,10 +141,7 @@ pub fn fatal<E: Display>(e: E) -> ! {
 #[cold]
 #[inline(never)]
 pub fn eprint(args: Arguments<'_>) {
-    if IN_ALT_SCREEN.load(Relaxed) {
-        print!("\x1b[?1049l");
-        _ = stdout().flush();
-    }
+    restore_screen();
     _ = writeln!(stderr(), "{args}");
 }
 
