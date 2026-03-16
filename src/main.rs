@@ -71,7 +71,7 @@ use chunk::{
 use crop::{CropDetectConfig, detect_crop};
 use encode::encode_all;
 use encoder::Encoder;
-use error::{IN_ALT_SCREEN, Xerr, eprint, fatal};
+use error::{IN_ALT_SCREEN, Xerr, eprint, fatal, restore_screen};
 use ffms::{DecodeStrat, VidInf, VideoDecoder, gcd, get_decode_strat, get_vidinf};
 use scd::fd_scenes;
 use y4m::{PipeReader, init_pipe};
@@ -111,10 +111,7 @@ pub struct Args {
 }
 
 extern "C" fn restore() {
-    if IN_ALT_SCREEN.load(Relaxed) {
-        print!("\x1b[?25h\x1b[?1049l");
-        _ = stdout().flush();
-    }
+    restore_screen();
 }
 extern "C" fn exit_restore(_: i32) {
     restore();
@@ -734,8 +731,7 @@ fn print_summary(
     crop: (u32, u32),
     enc_time: Duration,
 ) {
-    print!("\x1b[?25h\x1b[?1049l");
-    _ = stdout().flush();
+    restore_screen();
 
     let input_size = metadata(&args.input).map_or(0, |m| m.len());
     let output_size = metadata(&args.output).map_or(0, |m| m.len());
@@ -795,8 +791,6 @@ fn main() -> Result<(), Xerr> {
     let output = args.output.clone();
 
     set_hook(Box::new(move |panic_info| {
-        print!("\x1b[?25h\x1b[?1049l");
-        _ = stdout().flush();
         eprint(format_args!("{panic_info}"));
         eprint(format_args!("{}, FAIL", output.display()));
     }));
@@ -810,8 +804,6 @@ fn main() -> Result<(), Xerr> {
     }
 
     if let Err(e) = main_with_args(&args) {
-        print!("\x1b[?1049l");
-        _ = stdout().flush();
         fatal(format_args!("{e}\n{}, FAIL", args.output.display()));
     }
 
