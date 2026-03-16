@@ -19,6 +19,7 @@ nvidia = []
 amd = []
 vcpkg = []
 5fish = []
+static = []
 
 [build-dependencies]
 nasm-rs = { version = "0.3.2", features = ["parallel"] }
