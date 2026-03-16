@@ -392,7 +392,9 @@ clone_phase() {
 
         clone_async "${BUILD_DIR}/opus" "https://gitlab.xiph.org/xiph/opus.git"
         clone_async "${BUILD_DIR}/libopusenc" "https://gitlab.xiph.org/xiph/libopusenc.git"
-        clone_async "${BUILD_DIR}/SVT-AV1" "${svt_fork_url}"
+        local svt_extra="--depth 1"
+        [[ -n "${svt_fork_branch:-}" ]] && svt_extra+=" --branch ${svt_fork_branch}"
+        clone_async "${BUILD_DIR}/SVT-AV1" "${svt_fork_url}" "${svt_extra}"
         clone_async "${BUILD_DIR}/dav1d" "https://code.videolan.org/videolan/dav1d.git"
         clone_async "${BUILD_DIR}/vulkan/Vulkan-Headers" "https://github.com/KhronosGroup/Vulkan-Headers.git" "--depth 1"
         clone_async "${BUILD_DIR}/vulkan/Vulkan-Loader" "https://github.com/KhronosGroup/Vulkan-Loader.git" "--depth 1"
@@ -793,12 +795,22 @@ setup_toolchain() {
         unset LDFLAGS
 }
 
-SVT_FORK_NAMES=("hdr" "essential" "5fish (requires some mainline updates, currently not usable)" "mainline")
+SVT_FORK_NAMES=("hdr" "essential" "5fish" "mainline" "tritium" "tritium yis branch (testing only, do not use)")
 SVT_FORK_URLS=(
         "https://github.com/juliobbv-p/svt-av1-hdr"
         "https://github.com/nekotrix/SVT-AV1-Essential"
         "https://github.com/5fish/svt-av1-psy"
         "https://gitlab.com/AOMediaCodec/SVT-AV1"
+        "https://github.com/Uranite/SVT-AV1-Tritium"
+        "https://github.com/Uranite/SVT-AV1-Tritium"
+)
+SVT_FORK_BRANCHES=(
+        ""
+        ""
+        ""
+        ""
+        ""
+        "yis"
 )
 
 main() {
@@ -889,7 +901,7 @@ main() {
                 while true; do
                         echo -ne "${C}Fork: ${N}"
                         read -r fork_choice
-                        [[ "${fork_choice}" =~ ^[1-4]$ ]] && {
+                        [[ "${fork_choice}" =~ ^[1-6]$ ]] && {
                                 fork_idx=$((fork_choice - 1))
                                 break
                         }
@@ -897,7 +909,16 @@ main() {
         }
         svt_fork_name="${SVT_FORK_NAMES[fork_idx]}"
         svt_fork_url="${SVT_FORK_URLS[fork_idx]}"
+        svt_fork_branch="${SVT_FORK_BRANCHES[fork_idx]}"
         loginf g "SVT-AV1 fork: ${svt_fork_name}"
+
+        if [[ "${fork_idx}" -eq 2 ]]; then
+                if [[ "${cargo_features}" == *"--features"* ]]; then
+                        cargo_features="${cargo_features},5fish"
+                else
+                        cargo_features="${cargo_features} --features 5fish"
+                fi
+        fi
 
         cleanup_existing
 
