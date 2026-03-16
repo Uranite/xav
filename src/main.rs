@@ -77,7 +77,7 @@ use chunk::{
 use crop::{CropConf, detect_crop};
 use enc::enc_all;
 use encoder::Encoder;
-use error::{IN_ALT_SCREEN, Xerr, eprint, fatal};
+use error::{IN_ALT_SCREEN, Xerr, eprint, fatal, restore_screen};
 use ffms::{DecStrat, VidDecoder, VidInf, get_dec_strat, get_vidinf, vid_bytes};
 use scd::fd_scenes;
 use svterr::val;
@@ -120,10 +120,7 @@ pub struct Args {
 }
 
 extern "C" fn restore() {
-    if IN_ALT_SCREEN.load(Relaxed) {
-        print!("\x1b[?25h\x1b[?1049l");
-        _ = stdout().flush();
-    }
+    restore_screen();
 }
 extern "C" fn exit_restore(_: i32) {
     restore();
@@ -726,8 +723,7 @@ fn print_sum(args: &Args, inf: &VidInf, chnks: &[Chunk], crop: (u32, u32), enc_t
     let inp_sz = vid_bytes(&args.inp, args.ranges.as_deref(), tot_frames);
     let out_sz = vid_bytes(&args.out, None, tot_frames);
 
-    print!("\x1b[?25h\x1b[?1049l");
-    _ = stdout().flush();
+    restore_screen();
     let durat = tot_frames as f32 * inf.fps_den as f32 / inf.fps_num as f32;
     let inp_br = inp_sz as f32 * 8.0 / durat / 1000.0;
     let out_br = out_sz as f32 * 8.0 / durat / 1000.0;
@@ -785,8 +781,6 @@ fn main() -> Result<(), Xerr> {
     let out = args.out.clone();
 
     set_hook(Box::new(move |panic_info| {
-        print!("\x1b[?25h\x1b[?1049l");
-        _ = stdout().flush();
         eprint(format_args!("{panic_info}"));
         eprint(format_args!("{}, FAIL", out.display()));
     }));
@@ -800,8 +794,6 @@ fn main() -> Result<(), Xerr> {
     }
 
     if let Err(e) = main_with_args(&args) {
-        print!("\x1b[?1049l");
-        _ = stdout().flush();
         fatal(format_args!("{e}\n{}, FAIL", args.out.display()));
     }
 
