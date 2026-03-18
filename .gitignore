@@ -1,12 +1,24 @@
-/*
+Cargo.lock
+*.y4m
+*.mkv
+*.mp4
+*.webm
 
-!/src/
-!/.cargo/
-!/test_files/
-!.rustfmt.toml
-!build.rs
-!build.sh
-!Cargo.toml
-!LICENSE
-!README.md
-!.gitignore
+# Dependencies
+/dav1d
+/FFmpeg
+/libopusenc
+/opus
+/svt-av1-hdr
+/svt-av1-essential
+/5fish-svt-av1-psy
+/svt-av1-tritium-yis
+/svt-av1-essential-yis
+/Vship
+/vulkan
+
+# Build
+/target
+
+# Lib
+/lib
