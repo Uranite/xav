@@ -858,6 +858,11 @@ fn main() -> Result<(), Xerr> {
         let cvvdp_per_frame =
             tq_target > 8.0 && tq_target <= 10.0 && args.metric_mode.starts_with('p');
 
+        if s.is_empty() {
+            println!("\nNo new TQ frames were evaluated; overall stats omitted.");
+            return Ok(());
+        }
+
         if is_butteraugli {
             s.sort_unstable_by(|a, b| b.total_cmp(a));
         } else {
