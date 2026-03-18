@@ -91,6 +91,8 @@ pub struct Args {
     pub cvvdp_conf: Option<String>,
     #[cfg(feature = "vship")]
     pub alt_param: Option<String>,
+    #[cfg(feature = "vship")]
+    pub reuse_tq: bool,
     pub sc_only: bool,
     pub hwdec: bool,
 }
@@ -123,6 +125,7 @@ fn print_help() {
         println!("{C}-v {P}┃ {C}--vship      {W}Metric worker count");
         println!("{C}-d {P}┃ {C}--display    {W}Display JSON file for CVVDP. Screen name must be {R}xav{W}");
         println!("{C}-P {P}┃ {C}--alt-param  {W}Alt params for TQ probing ({R}NOT RECOMMENDED{W}; expert-only)");
+        println!("   {P}┃ {C}--reuse-tq   {W}Reuse TQ stats from the .json file");
     }
     println!("{C}-T {P}┃ {C}--temp       {W}Parent folder for the temporary work directory");
     println!("   {P}┃ {C}--hwdec      {W}Use Vulkan hw decoding (perf depends on the input video and hardware)");
@@ -273,6 +276,8 @@ fn parse_args_loop(args: &[String]) -> Result<Args, Xerr> {
     );
     #[cfg(feature = "vship")]
     let (mut metric_mode, mut metric_worker) = ("mean".to_owned(), 1usize);
+    #[cfg(feature = "vship")]
+    let mut reuse_tq = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -314,6 +319,8 @@ fn parse_args_loop(args: &[String]) -> Result<Args, Xerr> {
             "-d" | "--display" => arg!(opt args, i, cvvdp_conf),
             #[cfg(feature = "vship")]
             "-P" | "--probe-param" => arg!(opt args, i, alt_param),
+            #[cfg(feature = "vship")]
+            "--reuse-tq" => reuse_tq = true,
             "--hwdec" => hwdec = true,
             "--sc-only" => sc_only = true,
             "-h" | "--help" => {
@@ -358,6 +365,8 @@ fn parse_args_loop(args: &[String]) -> Result<Args, Xerr> {
         cvvdp_conf,
         #[cfg(feature = "vship")]
         alt_param,
+        #[cfg(feature = "vship")]
+        reuse_tq,
     })
 }
 

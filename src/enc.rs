@@ -506,17 +506,17 @@ fn run_metric_worker(
 
         if should_complete {
             let best = ctx.tq_ctx.best_probe(&tq_state.probes);
-            if ctx.use_alt_param {
+            let bp = probe_path(
+                ctx.work_dir,
+                pkg.chnk.idx,
+                best.crf,
+                ctx.encoder.extension(),
+            );
+            if ctx.use_alt_param || !bp.exists() {
                 tq_state.final_enc = true;
                 tq_state.last_crf = best.crf;
                 _ = work_tx.send(pkg);
             } else {
-                let bp = probe_path(
-                    ctx.work_dir,
-                    pkg.chnk.idx,
-                    best.crf,
-                    ctx.encoder.extension(),
-                );
                 complete_chnk(pkg.chnk.idx, pkg.frame_cnt, &bp, ctx, tq_state, best);
             }
         } else {
@@ -588,25 +588,122 @@ fn tq_enc_loop(
     alt_param: Option<&str>,
     tq_ctx: &TQCtx,
     worker_id: usize,
+    tq_cache: &BTreeMap<usize, Vec<(f64, f64, u64)>>,
 ) {
     let mut conv_buf = vec![0u8; ctx.pipe.conv_buf_sz];
     while let Ok(mut pkg) = rx.recv() {
-        let tq = pkg.tq_state.get_or_insert_with(|| TQState {
-            probes: Vec::new(),
-            probe_szs: Vec::new(),
-            search_min: tq_ctx.qp_min,
-            search_max: tq_ctx.qp_max,
-            round: 0,
-            target: tq_ctx.target,
-            last_crf: 0.0,
-            final_enc: false,
+        let mut just_initialized = false;
+        let mut tq = pkg.tq_state.take().unwrap_or_else(|| {
+            let mut state = TQState {
+                probes: Vec::new(),
+                probe_szs: Vec::new(),
+                search_min: tq_ctx.qp_min,
+                search_max: tq_ctx.qp_max,
+                round: 0,
+                target: tq_ctx.target,
+                last_crf: 0.0,
+                final_enc: false,
+            };
+            if let Some(cached) = tq_cache.get(&(pkg.chnk.idx as usize)) {
+                for &(crf_f64, score_f64, size) in cached {
+                    let crf = crf_f64 as f32;
+                    let score = score_f64 as f32;
+                    if !state.probes.iter().any(|p| (p.crf - crf).abs() < 0.001) {
+                        state.last_crf = crf;
+                        state.probes.push(Probe {
+                            crf,
+                            score,
+                            frame_scores: Vec::new(),
+                        });
+                        state.probe_szs.push((crf, size));
+                        tq_ctx.up_bounds(&mut state, score);
+                    }
+                }
+                state.round = state.probes.len() as u8;
+            }
+            just_initialized = true;
+            state
         });
-        let is_final = tq.final_enc;
-        let crf = if is_final {
-            tq.last_crf
+
+        let mut is_final = tq.final_enc;
+        let mut crf;
+        let mut bypass_metric = false;
+
+        if just_initialized && !tq.probes.is_empty() {
+            let mut converge_or_exhaust = tq.search_min > tq.search_max || tq.round > 10;
+            if !converge_or_exhaust {
+                for p in &tq.probes {
+                    if tq_ctx.converged(p.score) {
+                        converge_or_exhaust = true;
+                        break;
+                    }
+                }
+            }
+            if converge_or_exhaust {
+                let best = tq_ctx.best_probe(&tq.probes);
+                let bp = probe_path(
+                    ctx.work_dir,
+                    pkg.chnk.idx,
+                    best.crf,
+                    ctx.encoder.extension(),
+                );
+                if alt_param.is_some() || !bp.exists() {
+                    tq.final_enc = true;
+                    tq.last_crf = best.crf;
+                    is_final = true;
+                } else {
+                    let dst = ctx.work_dir.join("encode").join(format!(
+                        "{:04}.{}",
+                        pkg.chnk.idx,
+                        ctx.encoder.extension()
+                    ));
+                    _ = copy(&bp, &dst);
+                    tq.final_enc = true;
+                    tq.last_crf = best.crf;
+                    bypass_metric = true;
+                }
+            }
+        }
+
+        if !is_final && !bypass_metric {
+            crf = tq_search_crf(&mut tq, ctx.encoder);
+            if tq.probes.iter().any(|p| (p.crf - crf).abs() < 0.001) {
+                let best = tq_ctx.best_probe(&tq.probes);
+                let bp = probe_path(
+                    ctx.work_dir,
+                    pkg.chnk.idx,
+                    best.crf,
+                    ctx.encoder.extension(),
+                );
+                if alt_param.is_some() || !bp.exists() {
+                    tq.final_enc = true;
+                    tq.last_crf = best.crf;
+                    is_final = true;
+                    crf = tq.last_crf;
+                } else {
+                    let dst = ctx.work_dir.join("encode").join(format!(
+                        "{:04}.{}",
+                        pkg.chnk.idx,
+                        ctx.encoder.extension()
+                    ));
+                    _ = copy(&bp, &dst);
+                    tq.final_enc = true;
+                    tq.last_crf = best.crf;
+                    bypass_metric = true;
+                    crf = tq.last_crf;
+                }
+            }
         } else {
-            tq_search_crf(tq, ctx.encoder)
-        };
+            crf = tq.last_crf;
+        }
+
+        pkg.tq_state = Some(tq);
+
+        if bypass_metric {
+            _ = tx.send(pkg);
+            continue;
+        }
+
         let (p, out) = if is_final {
             (
                 params,
@@ -720,6 +817,36 @@ fn enc_tq(
     let (met_tx, met_rx) = bounded::<WorkPkg>(2);
     let (enc_rx, met_rx) = (Arc::new(dec.enc_rx), Arc::new(met_rx));
 
+    let mut tq_cache: BTreeMap<usize, Vec<(f64, f64, u64)>> = BTreeMap::new();
+    if args.reuse_tq {
+        if let Ok(json_str) = std::fs::read_to_string(args.inp.with_extension("json")) {
+            if let Ok(log) = from_str::<CachedTqLog>(&json_str) {
+                let chunks_opt = match tq_ctx.metric_name() {
+                    "butteraugli" => log.chunks_butteraugli,
+                    "cvvdp" => log.chunks_cvvdp,
+                    "ssimulacra2" => log.chunks_ssimulacra2,
+                    _ => None,
+                };
+                if let Some(cached_chunks) = chunks_opt {
+                    let fps = f64::from(inf.fps_num) / f64::from(inf.fps_den);
+                    for cc in cached_chunks {
+                        let frames = chnks.iter().find(|c| (c.idx as usize) == cc.id).map_or(0, |c| c.end - c.start);
+                        let d = frames as f64 / fps;
+                        let mut cp: Vec<(f64, f64, u64)> = Vec::new();
+                        for p in cc.probes.iter().chain(std::iter::once(&cc.final_p)) {
+                            let size = (p.kbs * d * 1000.0 / 8.0) as u64;
+                            if !cp.iter().any(|&(c, _, _)| (c - p.crf).abs() < 0.001) {
+                                cp.push((p.crf, p.score, size));
+                            }
+                        }
+                        tq_cache.insert(cc.id, cp);
+                    }
+                }
+            }
+        }
+    }
+    let tq_cache_arc = Arc::new(tq_cache);
+
     let resume_state = Arc::new(Mutex::new(resume_data.clone()));
     let tq_logger = Arc::new(Mutex::new(Vec::new()));
     let stats = create_stats(completed_cnt, &resume_data);
@@ -747,6 +874,7 @@ fn enc_tq(
         encoder: args.encoder,
         use_alt_param: args.alt_param.is_some(),
         worker_cnt: args.worker,
+        tq_cache: &tq_cache_arc,
     };
 
     let metric_workers =
@@ -781,6 +909,7 @@ struct TQSpawnCtx<'a> {
     encoder: Encoder,
     use_alt_param: bool,
     worker_cnt: usize,
+    tq_cache: &'a Arc<BTreeMap<usize, Vec<(f64, f64, u64)>>>,
 }
 
 #[cfg(feature = "vship")]
@@ -839,6 +968,7 @@ fn spawn_tq_encoders(
         let (params, alt_param) = (sc.args.params.clone(), sc.args.alt_param.clone());
         let prog_clone = Arc::clone(sc.prog);
         let (tq_ctx, encoder) = (sc.tq_ctx, sc.encoder);
+        let tq_cache = Arc::clone(sc.tq_cache);
         let svt_enc: SvtEncFn = if !sc.inf.is_10b && !sc.pipe.frame_sz.is_multiple_of(SHIFT_CHUNK) {
             enc_svt_lib_rem
         } else {
@@ -861,6 +991,7 @@ fn spawn_tq_encoders(
                 alt_param.as_deref(),
                 &tq_ctx,
                 worker_id,
+                &tq_cache,
             );
         }));
     }
@@ -1222,6 +1353,31 @@ struct TqChunkLine {
     fc: f32,
     fs: f32,
     fz: u64,
+}
+
+#[cfg(feature = "vship")]
+#[derive(serde::Deserialize)]
+struct CachedTqLog {
+    chunks_butteraugli: Option<Vec<CachedTqChunk>>,
+    chunks_cvvdp: Option<Vec<CachedTqChunk>>,
+    chunks_ssimulacra2: Option<Vec<CachedTqChunk>>,
+}
+
+#[cfg(feature = "vship")]
+#[derive(serde::Deserialize)]
+struct CachedTqChunk {
+    id: usize,
+    probes: Vec<CachedTqProbe>,
+    #[serde(rename = "final")]
+    final_p: CachedTqProbe,
+}
+
+#[cfg(feature = "vship")]
+#[derive(serde::Deserialize)]
+struct CachedTqProbe {
+    crf: f64,
+    score: f64,
+    kbs: f64,
 }
 
 #[cfg(feature = "vship")]
