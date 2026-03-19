@@ -621,67 +621,104 @@ fn tq_enc_loop(
 ) {
     let mut conv_buf = vec![0u8; ctx.pipe.conv_buf_size];
     while let Ok(mut pkg) = rx.recv() {
-        let mut tq = pkg.tq_state.take().unwrap_or_else(|| TQState {
-            probes: Vec::new(),
-            probe_sizes: Vec::new(),
-            search_min: tq_ctx.qp_min,
-            search_max: tq_ctx.qp_max,
-            round: 0,
-            target: tq_ctx.target,
-            last_crf: 0.0,
-            final_encode: false,
+        let mut just_initialized = false;
+        let mut tq = pkg.tq_state.take().unwrap_or_else(|| {
+            let mut state = TQState {
+                probes: Vec::new(),
+                probe_sizes: Vec::new(),
+                search_min: tq_ctx.qp_min,
+                search_max: tq_ctx.qp_max,
+                round: 0,
+                target: tq_ctx.target,
+                last_crf: 0.0,
+                final_encode: false,
+            };
+            if let Some(cached) = tq_cache.get(&pkg.chunk.idx) {
+                for &(crf, score, size) in cached {
+                    if !state.probes.iter().any(|p| (p.crf - crf).abs() < 0.001) {
+                        state.last_crf = crf;
+                        state.probes.push(Probe {
+                            crf,
+                            score,
+                            frame_scores: Vec::new(),
+                        });
+                        state.probe_sizes.push((crf, size));
+                        tq_ctx.update_bounds_and_check(&mut state, score);
+                    }
+                }
+                state.round = state.probes.len();
+            }
+            just_initialized = true;
+            state
         });
 
         let mut is_final = tq.final_encode;
         let mut crf;
         let mut bypass_metric = false;
 
-        if !is_final {
-            loop {
-                crf = tq_search_crf(&mut tq, ctx.encoder);
-                if let Some(cached) = tq_cache.get(&pkg.chunk.idx) {
-                    if let Some(&(_, score, size)) =
-                        cached.iter().find(|&&(c, _, _)| (c - crf).abs() < 0.001)
-                    {
-                        tq.probes.push(Probe {
-                            crf,
-                            score,
-                            frame_scores: Vec::new(),
-                        });
-                        tq.probe_sizes.push((crf, size));
-                        let should_complete = tq_ctx.converged(score)
-                            || tq.round > 10
-                            || tq_ctx.update_bounds_and_check(&mut tq, score);
-                        if should_complete {
-                            let best = tq_ctx.best_probe(&tq.probes);
-                            let bp = probe_path(
-                                ctx.work_dir,
-                                pkg.chunk.idx,
-                                best.crf,
-                                ctx.encoder.extension(),
-                            );
-                            if probe_params.is_some() || !bp.exists() {
-                                tq.final_encode = true;
-                                tq.last_crf = best.crf;
-                                is_final = true;
-                                crf = tq.last_crf;
-                            } else {
-                                let dst = ctx.work_dir.join("encode").join(format!(
-                                    "{:04}.{}",
-                                    pkg.chunk.idx,
-                                    ctx.encoder.extension()
-                                ));
-                                _ = copy(&bp, &dst);
-                                tq.final_encode = true;
-                                tq.last_crf = best.crf;
-                                bypass_metric = true;
-                            }
-                            break;
-                        }
-                        continue;
+        if just_initialized && !tq.probes.is_empty() {
+            let mut converge_or_exhaust = tq.search_min > tq.search_max || tq.round > 10;
+            if !converge_or_exhaust {
+                for p in &tq.probes {
+                    if tq_ctx.converged(p.score) {
+                        converge_or_exhaust = true;
+                        break;
                     }
                 }
-                break;
+            }
+            if converge_or_exhaust {
+                let best = tq_ctx.best_probe(&tq.probes);
+                let bp = probe_path(
+                    ctx.work_dir,
+                    pkg.chunk.idx,
+                    best.crf,
+                    ctx.encoder.extension(),
+                );
+                if probe_params.is_some() || !bp.exists() {
+                    tq.final_encode = true;
+                    tq.last_crf = best.crf;
+                    is_final = true;
+                } else {
+                    let dst = ctx.work_dir.join("encode").join(format!(
+                        "{:04}.{}",
+                        pkg.chunk.idx,
+                        ctx.encoder.extension()
+                    ));
+                    _ = copy(&bp, &dst);
+                    tq.final_encode = true;
+                    tq.last_crf = best.crf;
+                    bypass_metric = true;
+                }
+            }
+        }
+
+        if !is_final && !bypass_metric {
+            crf = tq_search_crf(&mut tq, ctx.encoder);
+            if tq.probes.iter().any(|p| (p.crf - crf).abs() < 0.001) {
+                let best = tq_ctx.best_probe(&tq.probes);
+                let bp = probe_path(
+                    ctx.work_dir,
+                    pkg.chunk.idx,
+                    best.crf,
+                    ctx.encoder.extension(),
+                );
+                if probe_params.is_some() || !bp.exists() {
+                    tq.final_encode = true;
+                    tq.last_crf = best.crf;
+                    is_final = true;
+                    crf = tq.last_crf;
+                } else {
+                    let dst = ctx.work_dir.join("encode").join(format!(
+                        "{:04}.{}",
+                        pkg.chunk.idx,
+                        ctx.encoder.extension()
+                    ));
+                    _ = copy(&bp, &dst);
+                    tq.final_encode = true;
+                    tq.last_crf = best.crf;
+                    bypass_metric = true;
+                    crf = tq.last_crf;
+                }
             }
         } else {
             crf = tq.last_crf;
