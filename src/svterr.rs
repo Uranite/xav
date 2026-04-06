@@ -249,17 +249,7 @@ fn reject_msg(name: &str, key: &str) -> Option<Xerr> {
 fn check_param(name: &str, key: &str, val: &str) -> Result<(), Xerr> {
     match name {
         "preset" => {
-            chk_custom(
-                key,
-                val,
-                0,
-                7,
-                format_args!(
-                    "{Y}--preset should be between {C}0 {Y}and {C}7\n{Y}presets 8+ are intended \
-                     for real-time usage and inconsistent\npresets below 0 are intended for \
-                     debugging purposes"
-                ),
-            )?;
+            chk_range(key, name, val, -1, 11)?;
         }
 
         "lp" => {
