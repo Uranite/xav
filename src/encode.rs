@@ -838,27 +838,29 @@ fn encode_tq(
     let (enc_rx, met_rx) = (Arc::new(dec.enc_rx), Arc::new(met_rx));
 
     let mut tq_cache: BTreeMap<usize, Vec<(f64, f64, u64)>> = BTreeMap::new();
-    if let Ok(json_str) = std::fs::read_to_string(args.input.with_extension("json")) {
-        if let Ok(log) = from_str::<CachedTqLog>(&json_str) {
-            let chunks_opt = match tq_ctx.metric_name() {
-                "butteraugli" => log.chunks_butteraugli,
-                "cvvdp" => log.chunks_cvvdp,
-                "ssimulacra2" => log.chunks_ssimulacra2,
-                _ => None,
-            };
-            if let Some(cached_chunks) = chunks_opt {
-                let fps = f64::from(inf.fps_num) / f64::from(inf.fps_den);
-                for cc in cached_chunks {
-                    let frames = chunks.iter().find(|c| c.idx == cc.id).map_or(0, |c| c.end - c.start);
-                    let d = frames as f64 / fps;
-                    let mut cp: Vec<(f64, f64, u64)> = Vec::new();
-                    for p in cc.probes.iter().chain(std::iter::once(&cc.final_p)) {
-                        let size = (p.kbs * d * 1000.0 / 8.0) as u64;
-                        if !cp.iter().any(|&(c, _, _)| (c - p.crf).abs() < 0.001) {
-                            cp.push((p.crf, p.score, size));
+    if args.reuse_tq {
+        if let Ok(json_str) = std::fs::read_to_string(args.input.with_extension("json")) {
+            if let Ok(log) = from_str::<CachedTqLog>(&json_str) {
+                let chunks_opt = match tq_ctx.metric_name() {
+                    "butteraugli" => log.chunks_butteraugli,
+                    "cvvdp" => log.chunks_cvvdp,
+                    "ssimulacra2" => log.chunks_ssimulacra2,
+                    _ => None,
+                };
+                if let Some(cached_chunks) = chunks_opt {
+                    let fps = f64::from(inf.fps_num) / f64::from(inf.fps_den);
+                    for cc in cached_chunks {
+                        let frames = chunks.iter().find(|c| c.idx == cc.id).map_or(0, |c| c.end - c.start);
+                        let d = frames as f64 / fps;
+                        let mut cp: Vec<(f64, f64, u64)> = Vec::new();
+                        for p in cc.probes.iter().chain(std::iter::once(&cc.final_p)) {
+                            let size = (p.kbs * d * 1000.0 / 8.0) as u64;
+                            if !cp.iter().any(|&(c, _, _)| (c - p.crf).abs() < 0.001) {
+                                cp.push((p.crf, p.score, size));
+                            }
                         }
+                        tq_cache.insert(cc.id, cp);
                     }
-                    tq_cache.insert(cc.id, cp);
                 }
             }
         }
