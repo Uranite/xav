@@ -710,7 +710,11 @@ build_svtav1() {
                 --luminance-qp-bias 0 --sharpness 1 --passes 1 --film-grain 0
         )
 
-        git clone "${svt_fork_url}" "${BUILD_DIR}/SVT-AV1" > "${logfile}" 2>&1
+        if [[ -n "${svt_fork_branch:-}" ]]; then
+                git clone --depth 1 --branch "${svt_fork_branch}" "${svt_fork_url}" "${BUILD_DIR}/SVT-AV1" > "${logfile}" 2>&1
+        else
+                git clone --depth 1 "${svt_fork_url}" "${BUILD_DIR}/SVT-AV1" > "${logfile}" 2>&1
+        fi
         cd "${BUILD_DIR}/SVT-AV1"
 
         sed -i 's/set(CMAKE_POSITION_INDEPENDENT_CODE ON)/set(CMAKE_POSITION_INDEPENDENT_CODE OFF)/' CMakeLists.txt
@@ -789,12 +793,20 @@ setup_toolchain() {
         unset LDFLAGS
 }
 
-SVT_FORK_NAMES=("hdr" "essential" "5fish (requires some mainline updates, currently not usable)" "mainline")
+SVT_FORK_NAMES=("hdr" "essential" "5fish" "mainline" "tritium yis branch (testing only, do not use)")
 SVT_FORK_URLS=(
         "https://github.com/juliobbv-p/svt-av1-hdr"
         "https://github.com/nekotrix/SVT-AV1-Essential"
         "https://github.com/5fish/svt-av1-psy"
         "https://gitlab.com/AOMediaCodec/SVT-AV1"
+        "https://github.com/Uranite/SVT-AV1-Tritium"
+)
+SVT_FORK_BRANCHES=(
+        ""
+        ""
+        ""
+        ""
+        "yis"
 )
 
 main() {
@@ -888,7 +900,7 @@ main() {
                 while true; do
                         echo -ne "${C}Fork: ${N}"
                         read -r fork_choice
-                        [[ "${fork_choice}" =~ ^[1-4]$ ]] && {
+                        [[ "${fork_choice}" =~ ^[1-5]$ ]] && {
                                 fork_idx=$((fork_choice - 1))
                                 break
                         }
@@ -896,7 +908,16 @@ main() {
         }
         svt_fork_name="${SVT_FORK_NAMES[fork_idx]}"
         svt_fork_url="${SVT_FORK_URLS[fork_idx]}"
+        svt_fork_branch="${SVT_FORK_BRANCHES[fork_idx]}"
         loginf g "SVT-AV1 fork: ${svt_fork_name}"
+
+        if [[ "${fork_idx}" -eq 2 ]]; then
+                if [[ "${cargo_features}" == *"--features"* ]]; then
+                        cargo_features="${cargo_features},5fish"
+                else
+                        cargo_features="${cargo_features} --features 5fish"
+                fi
+        fi
 
         cleanup_existing
 
