@@ -917,8 +917,8 @@ Write-Host "Select SVT-AV1 variant to compile:"
 Write-Host "  1. svt-av1-hdr       (https://github.com/juliobbv-p/svt-av1-hdr)"
 Write-Host "  2. svt-av1-essential (https://github.com/nekotrix/SVT-AV1-Essential)"
 Write-Host "  3. 5fish             (https://github.com/5fish/svt-av1-psy)"
-Write-Host "  4. svt-av1-tritium yis branch [WARNING: DO NOT USE - testing only] (https://github.com/Uranite/svt-av1-tritium/tree/yis)"
-Write-Host "  5. svt-av1-essential yiss fork [WARNING: DO NOT USE - testing only] (https://github.com/Uranite/SVT-AV1-Essential)"
+Write-Host "  4. svt-av1-tritium yis branch [testing only, do not use] (https://github.com/Uranite/svt-av1-tritium/tree/yis)"
+Write-Host "  5. svt-av1-essential yiss fork [testing only, do not use] (https://github.com/Uranite/SVT-AV1-Essential)"
 $svtChoice = Read-Host "Enter choice (1-5) [Default: 1]"
 if (-not $svtChoice) { $svtChoice = '1' }
 
