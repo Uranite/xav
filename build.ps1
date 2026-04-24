@@ -917,17 +917,21 @@ Write-Host "Select SVT-AV1 variant to compile:"
 Write-Host "  1. svt-av1-hdr       (https://github.com/juliobbv-p/svt-av1-hdr)"
 Write-Host "  2. svt-av1-essential (https://github.com/nekotrix/SVT-AV1-Essential)"
 Write-Host "  3. 5fish             (https://github.com/5fish/svt-av1-psy)"
-Write-Host "  4. svt-av1-tritium yis branch [testing only, do not use] (https://github.com/Uranite/svt-av1-tritium/tree/yis)"
-Write-Host "  5. svt-av1-essential yiss fork [testing only, do not use] (https://github.com/Uranite/SVT-AV1-Essential)"
-$svtChoice = Read-Host "Enter choice (1-5) [Default: 1]"
+Write-Host "  4. svt-av1-tritium   (https://github.com/Uranite/svt-av1-tritium)"
+Write-Host "  5. svt-av1-tritium yis branch [testing only, do not use]   (https://github.com/Uranite/svt-av1-tritium/tree/yis)"
+Write-Host "  6. svt-av1-tritium yis-2 branch [testing only, do not use] (https://github.com/Uranite/svt-av1-tritium/tree/yis-2)"
+Write-Host "  7. svt-av1-essential yiss fork [testing only, do not use]  (https://github.com/Uranite/SVT-AV1-Essential)"
+$svtChoice = Read-Host "Enter choice (1-7) [Default: 1]"
 if (-not $svtChoice) { $svtChoice = '1' }
 
 switch ($svtChoice) {
     '1' { $svtVariant = 'svt-av1-hdr'; $svtRepo = 'https://github.com/juliobbv-p/svt-av1-hdr.git'; $svtBranch = ''; $svtDir = 'svt-av1-hdr'; $svtExtraCFlags = '' }
     '2' { $svtVariant = 'svt-av1-essential'; $svtRepo = 'https://github.com/nekotrix/SVT-AV1-Essential.git'; $svtBranch = ''; $svtDir = 'SVT-AV1-Essential'; $svtExtraCFlags = '' }
     '3' { $svtVariant = '5fish'; $svtRepo = 'https://github.com/5fish/svt-av1-psy.git'; $svtBranch = ''; $svtDir = '5fish-svt-av1-psy'; $svtExtraCFlags = '-DSVT_LOG_QUIET' }
-    '4' { $svtVariant = 'svt-av1-tritium-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = 'yis'; $svtDir = 'svt-av1-tritium-yis'; $svtExtraCFlags = '' }
-    '5' { $svtVariant = 'svt-av1-essential-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-essential.git'; $svtBranch = ''; $svtDir = 'svt-av1-essential-yis'; $svtExtraCFlags = '' }
+    '4' { $svtVariant = 'svt-av1-tritium'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = ''; $svtDir = 'svt-av1-tritium'; $svtExtraCFlags = '' }
+    '5' { $svtVariant = 'svt-av1-tritium-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = 'yis'; $svtDir = 'svt-av1-tritium-yis'; $svtExtraCFlags = '' }
+    '6' { $svtVariant = 'svt-av1-tritium-yis-2'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = 'yis-2'; $svtDir = 'svt-av1-tritium-yis-2'; $svtExtraCFlags = '' }
+    '7' { $svtVariant = 'svt-av1-essential-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-essential.git'; $svtBranch = ''; $svtDir = 'svt-av1-essential-yis'; $svtExtraCFlags = '' }
     default {
         Write-Host "[ERROR] Invalid choice." -ForegroundColor Red
         exit 1
