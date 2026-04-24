@@ -459,10 +459,10 @@ function Build-SvtAv1 {
 
     Invoke-Step "PGO Run for $Variant" {
         if ($clipFile -notlike '*.y4m') {
-            & "..\FFmpeg\ffmpeg.exe" -i "$clipFile" -f yuv4mpegpipe -pix_fmt yuv420p10le -strict -1 - | & ".\svt_build_gen\SvtAv1EncApp.exe" -i - -b NUL --preset 2 | Out-Host
+            & "..\FFmpeg\ffmpeg.exe" -i "$clipFile" -f yuv4mpegpipe -pix_fmt yuv420p10le -strict -1 - | & ".\svt_build_gen\SvtAv1EncApp.exe" -i - -b NUL --preset 3 | Out-Host
         }
         else {
-            & ".\svt_build_gen\SvtAv1EncApp.exe" -i "$clipFile" -b NUL --preset 2 | Out-Host
+            & ".\svt_build_gen\SvtAv1EncApp.exe" -i "$clipFile" -b NUL --preset 3 | Out-Host
         }
     }
 
