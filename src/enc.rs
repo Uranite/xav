@@ -59,11 +59,18 @@ use crate::{
 #[cfg(feature = "vship")]
 use crate::{
     pipeline::MetricProgs,
-    tq::{Probe, ProbeLog, interpolate_crf},
+    tq::{Probe, ProbeLog, interpolate_crf, round_crf},
     vship::{VshipProcessor, init_device},
     worker::TQState,
 };
 
+#[cfg(feature = "vship")]
+use std::sync::OnceLock;
+
+#[cfg(feature = "vship")]
+pub static TQ_SCORES: OnceLock<Mutex<Vec<f32>>> = OnceLock::new();
+#[cfg(feature = "vship")]
+pub static GLOBAL_BEST_CRF: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 fn join_one(handle: JoinHandle<()>) {
     if let Err(e) = handle.join() {
         resume_unwind(e);
@@ -292,6 +299,7 @@ struct TQCtx {
     qp_max: f32,
     use_butter: bool,
     use_cvvdp: bool,
+    cvvdp_per_frame: bool,
     cvvdp_conf: Option<&'static str>,
 }
 
@@ -410,6 +418,26 @@ fn complete_chnk(
     };
     write_chnk_log(&log_entry, ctx.work_dir);
     unsafe { ctx.tq_logger.lock().unwrap_unchecked() }.push(log_entry);
+
+    let mut tq_scores = unsafe {
+        TQ_SCORES
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .unwrap_unchecked()
+    };
+    if ctx.tq_ctx.use_cvvdp && !ctx.tq_ctx.cvvdp_per_frame {
+        tq_scores.push(best.score);
+    } else {
+        let matched = unsafe {
+            tq_state
+                .probes
+                .iter()
+                .find(|p| (p.crf - best.crf).abs() < 0.001)
+                .unwrap_unchecked()
+        };
+        tq_scores.extend_from_slice(&matched.frame_scores);
+    }
+    GLOBAL_BEST_CRF.store(best.crf.to_bits(), Relaxed);
 }
 
 #[cfg(feature = "vship")]
@@ -543,6 +571,7 @@ fn parse_tq_ctx(args: &Args) -> TQCtx {
         qp_max: qp_parts[1],
         use_butter: tq_target < 8.0,
         use_cvvdp: tq_target > 8.0 && tq_target <= 10.0,
+        cvvdp_per_frame: tq_target > 8.0 && tq_target <= 10.0 && args.metric_mode.starts_with('p'),
         cvvdp_conf,
     }
 }
@@ -568,8 +597,24 @@ fn tq_coord(
 #[inline]
 fn tq_search_crf(tq: &mut TQState, encoder: Encoder) -> f32 {
     tq.round += 1;
-    let c = if tq.round <= 2 {
-        bisect(tq.search_min, tq.search_max)
+    let c = if tq.round == 1 {
+        let global_bits = GLOBAL_BEST_CRF.load(std::sync::atomic::Ordering::Relaxed);
+        if global_bits != 0 {
+            f32::from_bits(global_bits).clamp(tq.search_min, tq.search_max)
+        } else {
+            bisect(tq.search_min, tq.search_max)
+        }
+    } else if tq.round == 2 {
+        let p1 = tq.probes[0].crf;
+        let ratio = 0.333;
+        let guess = if tq.search_max < p1 {
+            p1 - (p1 - tq.search_min) * ratio
+        } else if tq.search_min > p1 {
+            p1 + (tq.search_max - p1) * ratio
+        } else {
+            bisect(tq.search_min, tq.search_max)
+        };
+        round_crf(guess)
     } else {
         interpolate_crf(&tq.probes, tq.target, tq.round)
     }
