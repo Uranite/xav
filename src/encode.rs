@@ -63,13 +63,15 @@ use crate::{
 #[cfg(feature = "vship")]
 use crate::{
     pipeline::MetricsProgress,
-    tq::{Probe, ProbeLog, binary_search, interpolate_crf},
+    tq::{Probe, ProbeLog, binary_search, interpolate_crf, round_crf},
     vship::{VshipProcessor, init_device},
     worker::TQState,
 };
 
 #[cfg(feature = "vship")]
 pub static TQ_SCORES: OnceLock<Mutex<Vec<f64>>> = OnceLock::new();
+#[cfg(feature = "vship")]
+pub static GLOBAL_BEST_CRF: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn join_one(handle: JoinHandle<()>) {
     if let Err(e) = handle.join() {
@@ -439,6 +441,7 @@ fn complete_chunk(
         };
         tq_scores.extend_from_slice(&matched.frame_scores);
     }
+    GLOBAL_BEST_CRF.store(best.crf.to_bits(), Relaxed);
 }
 
 #[cfg(feature = "vship")]
@@ -596,8 +599,24 @@ fn tq_coordinate(
 #[inline]
 fn tq_search_crf(tq: &mut TQState, encoder: Encoder) -> f64 {
     tq.round += 1;
-    let c = if tq.round <= 2 {
-        binary_search(tq.search_min, tq.search_max)
+    let c = if tq.round == 1 {
+        let global_bits = GLOBAL_BEST_CRF.load(std::sync::atomic::Ordering::Relaxed);
+        if global_bits != 0 {
+            f64::from_bits(global_bits).clamp(tq.search_min, tq.search_max)
+        } else {
+            binary_search(tq.search_min, tq.search_max)
+        }
+    } else if tq.round == 2 {
+        let p1 = tq.probes[0].crf;
+        let ratio = 0.333;
+        let guess = if tq.search_max < p1 {
+            p1 - (p1 - tq.search_min) * ratio
+        } else if tq.search_min > p1 {
+            p1 + (tq.search_max - p1) * ratio
+        } else {
+            binary_search(tq.search_min, tq.search_max)
+        };
+        round_crf(guess)
     } else {
         interpolate_crf(&tq.probes, tq.target, tq.round)
             .unwrap_or_else(|| binary_search(tq.search_min, tq.search_max))
