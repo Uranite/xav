@@ -105,6 +105,7 @@ handle_int() {
 
 trap 'handle_err' ERR
 trap 'handle_int' INT
+trap 'kill $(jobs -p) 2> /dev/null || true' EXIT
 
 show_opts() {
         opts=("${@}")
@@ -382,14 +383,49 @@ cleanup_existing() {
         echo
 }
 
+clone_async() {
+        local target="${1}" url="${2}" extra="${3:-}"
+        [[ -d "${target}" ]] && return
+        (
+                logfile="/tmp/clone_$(basename "${target}")_$$.log"
+                git clone ${extra} "${url}" "${target}" > "${logfile}" 2>&1
+                rm -f "${logfile}"
+        ) &
+        pids+=("${!}")
+}
+
+clone_phase() {
+        loginf b "Cloning repositories in parallel"
+
+        local pids=()
+
+        mkdir -p "${BUILD_DIR}/vulkan"
+
+        clone_async "${BUILD_DIR}/opus" "https://gitlab.xiph.org/xiph/opus.git"
+        clone_async "${BUILD_DIR}/libopusenc" "https://gitlab.xiph.org/xiph/libopusenc.git"
+        clone_async "${BUILD_DIR}/SVT-AV1" "${svt_fork_url}"
+        clone_async "${BUILD_DIR}/dav1d" "https://code.videolan.org/videolan/dav1d.git"
+        clone_async "${BUILD_DIR}/vulkan/Vulkan-Headers" "https://github.com/KhronosGroup/Vulkan-Headers.git" "--depth 1"
+        clone_async "${BUILD_DIR}/vulkan/Vulkan-Loader" "https://github.com/KhronosGroup/Vulkan-Loader.git" "--depth 1"
+        clone_async "${BUILD_DIR}/FFmpeg" "https://github.com/FFmpeg/FFmpeg"
+
+        local pid rc=0
+        for pid in "${pids[@]}"; do
+                wait "${pid}" || rc="${?}"
+        done
+        ((rc)) && exit 1
+
+        loginf g "Clones complete"
+}
+
 build_dav1d() {
-        [[ -d "${BUILD_DIR}/dav1d" ]] && return
+        [[ -f "${BUILD_DIR}/dav1d/lib/pkgconfig/dav1d.pc" ]] && return
 
         loginf b "Building dav1d"
 
         local logfile="/tmp/build_dav1d_$.log"
+        : > "${logfile}"
 
-        git clone https://code.videolan.org/videolan/dav1d.git "${BUILD_DIR}/dav1d" > "${logfile}" 2>&1
         cd "${BUILD_DIR}/dav1d"
         meson setup build --default-library=static \
                 --buildtype=release \
@@ -417,24 +453,19 @@ build_dav1d() {
 }
 
 build_vulkan() {
-        [[ -d "${BUILD_DIR}/vulkan" ]] && return
+        [[ -f "${BUILD_DIR}/vulkan/install/lib/libvulkan.a" ]] && return
 
         loginf b "Building Vulkan (headers + loader)"
 
         local logfile="/tmp/build_vulkan_$.log"
         local install_dir="${BUILD_DIR}/vulkan/install"
+        : > "${logfile}"
 
-        mkdir -p "${BUILD_DIR}/vulkan"
-
-        git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git \
-                "${BUILD_DIR}/vulkan/Vulkan-Headers" > "${logfile}" 2>&1
         cmake -S "${BUILD_DIR}/vulkan/Vulkan-Headers" -B "${BUILD_DIR}/vulkan/Vulkan-Headers/build" \
                 -G Ninja \
                 -DCMAKE_INSTALL_PREFIX="${install_dir}" >> "${logfile}" 2>&1
         ninja -C "${BUILD_DIR}/vulkan/Vulkan-Headers/build" install >> "${logfile}" 2>&1
 
-        git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Loader.git \
-                "${BUILD_DIR}/vulkan/Vulkan-Loader" >> "${logfile}" 2>&1
         sed -i 's/add_library(vulkan SHARED)/add_library(vulkan STATIC)/' \
                 "${BUILD_DIR}/vulkan/Vulkan-Loader/loader/CMakeLists.txt"
         sed -i '/install(TARGETS vulkan EXPORT/d; /install(EXPORT VulkanLoaderConfig/d' \
@@ -482,17 +513,16 @@ build_vulkan() {
 }
 
 build_ffmpeg() {
-        [[ -d "${BUILD_DIR}/FFmpeg" ]] && return
+        [[ -f "${BUILD_DIR}/FFmpeg/install/lib/libavcodec.a" ]] && return
 
         loginf b "Building FFmpeg"
 
         export PKG_CONFIG_PATH="${BUILD_DIR}/dav1d/lib/pkgconfig:${BUILD_DIR}/vulkan/install/lib/pkgconfig:${BUILD_DIR}/FFmpeg/install/lib/pkgconfig"
 
         local logfile="/tmp/build_ffmpeg_$.log"
+        : > "${logfile}"
 
-        cd "${BUILD_DIR}"
-        git clone "https://github.com/FFmpeg/FFmpeg" > "${logfile}" 2>&1
-        cd "FFmpeg"
+        cd "${BUILD_DIR}/FFmpeg"
 
         local vk_inc="${BUILD_DIR}/vulkan/install/include"
         local vk_lib="${BUILD_DIR}/vulkan/install/lib"
@@ -628,13 +658,13 @@ build_ffmpeg() {
 }
 
 build_opus() {
-        [[ -d "${BUILD_DIR}/opus" ]] && return
+        [[ -f "${BUILD_DIR}/opus/install/lib/libopus.a" ]] && return
 
         loginf b "Building opus"
 
         local logfile="/tmp/build_opus_$.log"
+        : > "${logfile}"
 
-        git clone https://gitlab.xiph.org/xiph/opus.git "${BUILD_DIR}/opus" > "${logfile}" 2>&1
         cd "${BUILD_DIR}/opus"
         cmake -B build -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
@@ -661,13 +691,13 @@ build_opus() {
 }
 
 build_opusenc() {
-        [[ -d "${BUILD_DIR}/libopusenc" ]] && return
+        [[ -f "${BUILD_DIR}/libopusenc/install/lib/libopusenc.a" ]] && return
 
         loginf b "Building libopusenc"
 
         local logfile="/tmp/build_opusenc_$.log"
+        : > "${logfile}"
 
-        git clone https://gitlab.xiph.org/xiph/libopusenc.git "${BUILD_DIR}/libopusenc" > "${logfile}" 2>&1
         cd "${BUILD_DIR}/libopusenc"
         ./autogen.sh >> "${logfile}" 2>&1
         PKG_CONFIG_PATH="${BUILD_DIR}/opus/install/lib/pkgconfig" \
@@ -693,12 +723,13 @@ build_opusenc() {
 }
 
 build_svtav1() {
-        [[ -d "${BUILD_DIR}/SVT-AV1" ]] && return
+        [[ -f "${BUILD_DIR}/SVT-AV1/Bin/Release/libSvtAv1Enc.a" ]] && return
 
         loginf b "Building SVT-AV1 (${svt_fork_name})"
 
         local logfile="/tmp/build_svtav1_$.log"
         local pgo_dir="${BUILD_DIR}/SVT-AV1/pgo"
+        : > "${logfile}"
 
         pgo_params=(
                 --preset 1 --tune 0 --keyint 0 --scd 0 --scm 0 --tile-rows 0 --tile-columns 0 --rc 0
@@ -710,7 +741,6 @@ build_svtav1() {
                 --luminance-qp-bias 0 --sharpness 1 --passes 1 --film-grain 0
         )
 
-        git clone "${svt_fork_url}" "${BUILD_DIR}/SVT-AV1" > "${logfile}" 2>&1
         cd "${BUILD_DIR}/SVT-AV1"
 
         sed -i 's/set(CMAKE_POSITION_INDEPENDENT_CODE ON)/set(CMAKE_POSITION_INDEPENDENT_CODE OFF)/' CMakeLists.txt
@@ -902,14 +932,20 @@ main() {
 
         setup_toolchain
 
-        build_opus
-        build_opusenc
+        clone_phase
 
-        build_svtav1
+        build_opus & PID_OPUS="${!}"
+        build_dav1d & PID_DAV1D="${!}"
+        build_vulkan & PID_VULKAN="${!}"
+        build_svtav1 & PID_SVTAV1="${!}"
 
-        build_dav1d
-        build_vulkan
-        build_ffmpeg
+        wait "${PID_OPUS}" || exit 1
+        build_opusenc & PID_OPUSENC="${!}"
+
+        wait "${PID_DAV1D}" && wait "${PID_VULKAN}" || exit 1
+        build_ffmpeg & PID_FFMPEG="${!}"
+
+        wait "${PID_OPUSENC}" && wait "${PID_FFMPEG}" && wait "${PID_SVTAV1}" || exit 1
 
         cd "${XAV_DIR}"
 
