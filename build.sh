@@ -355,30 +355,47 @@ show_build_menu() {
 }
 
 cleanup_existing() {
-        local dirs=("dav1d" "FFmpeg" "opus" "libopusenc" "SVT-AV1" "vulkan")
-        local found=()
+        local -A artifacts=(
+                [dav1d]="lib/pkgconfig/dav1d.pc"
+                [FFmpeg]="install/lib/libavcodec.a"
+                [opus]="install/lib/libopus.a"
+                [libopusenc]="install/lib/libopusenc.a"
+                [SVT-AV1]="Bin/Release/libSvtAv1Enc.a"
+                [vulkan]="install/lib/pkgconfig/vulkan.pc"
+        )
 
-        for dir in "${dirs[@]}"; do
-                [[ -d "${BUILD_DIR}/${dir}" ]] && found+=("${dir}")
+        local successful=() incomplete=()
+        local dir
+
+        for dir in dav1d FFmpeg opus libopusenc SVT-AV1 vulkan; do
+                [[ -d "${BUILD_DIR}/${dir}" ]] || continue
+                [[ -f "${BUILD_DIR}/${dir}/${artifacts[${dir}]}" ]] && successful+=("${dir}") || incomplete+=("${dir}")
         done
 
-        [[ ${#found[@]} -eq 0 ]] && return
+        ((${#successful[@]} == 0 && ${#incomplete[@]} == 0)) && return
 
-        echo -e "\n${Y}Found existing build directories:${N}"
-        printf "  ${P}- %s${N}\n" "${found[@]}"
-
-        [[ -n "${preset}" ]] && loginf b "Using existing builds" || {
-                echo -ne "\n${C}Remove and rebuild? (y/n): ${N}"
-                read -r choice
-
-                [[ "${choice}" =~ ^[Yy]$ ]] && {
-                        for dir in "${found[@]}"; do
-                                loginf b "Removing ${BUILD_DIR}/${dir}"
-                                rm -rf "${BUILD_DIR:?}/${dir}" > "/dev/null" 2>&1
-                        done
-                        loginf g "Cleanup complete"
-                } || loginf b "Using existing builds"
+        ((${#successful[@]})) && {
+                echo -e "\n${G}Successful builds:${N}"
+                printf "  ${G}✓ %s${N}\n" "${successful[@]}"
         }
+
+        ((${#incomplete[@]})) && {
+                echo -e "\n${Y}Incomplete builds (will be deleted and rebuilt):${N}"
+                printf "  ${Y}✗ %s${N}\n" "${incomplete[@]}"
+        }
+
+        [[ -z "${preset}" ]] && ((${#successful[@]})) && {
+                echo -ne "\n${C}Update them too (re-clone latest from git)? (y/N): ${N}"
+                read -r choice
+                [[ "${choice}" =~ ^[Yy]$ ]] && {
+                        incomplete+=("${successful[@]}")
+                        successful=()
+                }
+        }
+
+        for dir in "${incomplete[@]}"; do
+                rm -rf "${BUILD_DIR:?}/${dir}"
+        done
 
         echo
 }
@@ -453,7 +470,7 @@ build_dav1d() {
 }
 
 build_vulkan() {
-        [[ -f "${BUILD_DIR}/vulkan/install/lib/libvulkan.a" ]] && return
+        [[ -f "${BUILD_DIR}/vulkan/install/lib/pkgconfig/vulkan.pc" ]] && return
 
         loginf b "Building Vulkan (headers + loader)"
 
