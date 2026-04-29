@@ -13,9 +13,19 @@ set -Eeuo pipefail
 install_deps() {
         ((UID != 0)) && { for i in sudo doas; do command -v "${i}" > /dev/null 2>&1 && priv="${i}"; done; }
 
-        for i in pacman dnf emerge brew; do command -v "${i}" > /dev/null 2>&1 && pm="${i}" || pm="unknown"; done
+        pm="unknown"
+        for i in apt-get pacman dnf emerge brew; do command -v "${i}" > /dev/null 2>&1 && { pm="${i}"; break; }; done
 
         case "${pm}" in
+                "apt-get")
+                        pkgs=(
+                                build-essential rustup nasm clang llvm lld libclang-rt-dev
+                                autoconf automake libtool cmake ninja-build pkg-config
+                                meson ffmpeg curl
+                        )
+                        ${priv:-} apt-get update
+                        ${priv:-} apt-get install -y "${pkgs[@]}"
+                        ;;
                 "pacman")
                         pkgs=(base-devel rustup nasm clang compiler-rt cmake llvm lld ninja meson ffmpeg curl)
                         ${priv:-} pacman -S --needed --noconfirm "${pkgs[@]}"
