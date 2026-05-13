@@ -819,7 +819,16 @@ sed -i "s/grep -qE 'LNK4044|lld-link: warning: ignoring unknown argument'/false/
     --enable-hwaccel=av1_vulkan \
     --enable-hwaccel=vp9_vulkan \
     --enable-filter=scale \
-    --enable-filter=format
+    --enable-filter=format \
+    --enable-demuxer=concat \
+    --enable-muxer=matroska \
+    --enable-muxer=webm \
+    --enable-muxer=ivf \
+    --enable-demuxer=ogg \
+    --enable-muxer=segment \
+    --enable-muxer=mp4 \
+    --enable-bsf=aac_adtstoasc \
+    --enable-bsf=extract_extradata
 make -j$(nproc)
 '@
             Set-Content -Path 'build_ffmpeg.sh' -Value $bashScript -Encoding Ascii
@@ -877,8 +886,6 @@ function Build-Xav {
 
     Write-Host ""
     if (-not (Test-Path 'target\release')) { New-Item -ItemType Directory 'target\release' | Out-Null }
-    # We don't need the dll since the gpu driver already provides it, but since we already compiled it, why not
-    if (-not (Test-Path 'target\release\vulkan-1.dll')) { Copy-Item 'vulkan\install\bin\vulkan-1.dll' 'target\release\vulkan-1.dll' -Force }
 }
 
 # main
