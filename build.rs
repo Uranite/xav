@@ -59,12 +59,21 @@ fn build_windows() {
                 "conv",
                 "deint_p010",
                 "deint_nv12",
-                "deint_nv12_to_10b",
+                "deint_nv12_10b",
                 "shift_p010",
             ] {
                 b.file(format!("asm/{set}/{k}.asm"));
             }
-            for k in ["pchip", "fc", "lerp", "bs"] {
+            for k in [
+                "crop_row_stats_u8",
+                "crop_row_stats_u16",
+                "crop_col_stats_u8",
+                "crop_col_stats_u16",
+                "calc_samp_frames",
+            ] {
+                b.file(format!("asm/{set}/{k}.asm"));
+            }
+            for k in ["pchip", "fc_spline", "lerp", "bs"] {
                 b.file(format!("asm/avx2/{k}.asm"));
             }
             b.compile("xavasm").unwrap_or_else(|e| {
