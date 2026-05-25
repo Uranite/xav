@@ -451,10 +451,10 @@ function Build-SvtAv1 {
             exit 1
         }
 
-        if (-not (Test-Path "..\Netflix_FoodMarket2_1920x1080_60fps_10bit_420_65f.y4m")) {
-            & "..\FFmpeg\ffmpeg.exe" -hide_banner -v error -stats -y -nostdin -i "..\$clipFile" -frames:v 65 -vf "scale=1920:1080:flags=lanczos+accurate_rnd+full_chroma_int:param0=4" -pix_fmt yuv420p10le -strict -1 -f yuv4mpegpipe "..\Netflix_FoodMarket2_1920x1080_60fps_10bit_420_65f.y4m"
+        if (-not (Test-Path "..\Netflix_FoodMarket2_1920x1080_60fps_10bit_420_96f.y4m")) {
+            & "..\FFmpeg\ffmpeg.exe" -hide_banner -v error -stats -y -nostdin -i "..\$clipFile" -frames:v 96 -vf "scale=1920:1080:flags=lanczos+accurate_rnd+full_chroma_int:param0=4" -pix_fmt yuv420p10le -strict -1 -f yuv4mpegpipe "..\Netflix_FoodMarket2_1920x1080_60fps_10bit_420_96f.y4m"
         }
-        $clipFile = "..\Netflix_FoodMarket2_1920x1080_60fps_10bit_420_65f.y4m"
+        $clipFile = "..\Netflix_FoodMarket2_1920x1080_60fps_10bit_420_96f.y4m"
     }
 
     Invoke-Step "PGO Run for $Variant" {
