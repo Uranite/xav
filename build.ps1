@@ -820,15 +820,13 @@ sed -i "s/grep -qE 'LNK4044|lld-link: warning: ignoring unknown argument'/false/
     --enable-hwaccel=vp9_vulkan \
     --enable-filter=scale \
     --enable-filter=format \
-    --enable-demuxer=concat \
     --enable-muxer=matroska \
     --enable-muxer=webm \
-    --enable-muxer=ivf \
-    --enable-demuxer=ogg \
-    --enable-muxer=segment \
     --enable-muxer=mp4 \
+    --enable-muxer=ivf \
+    --enable-bsf=extract_extradata \
     --enable-bsf=aac_adtstoasc \
-    --enable-bsf=extract_extradata
+    --enable-demuxer=ogg
 make -j$(nproc)
 '@
             Set-Content -Path 'build_ffmpeg.sh' -Value $bashScript -Encoding Ascii
