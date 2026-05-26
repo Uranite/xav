@@ -754,6 +754,7 @@ sed -i "s/grep -qE 'LNK4044|lld-link: warning: ignoring unknown argument'/false/
     --enable-decoder=vp9 \
     --enable-decoder=vc1 \
     --enable-decoder=vvc \
+    --enable-decoder=utvideo \
     --enable-decoder=aac \
     --enable-decoder=aac_latm \
     --enable-decoder=ac3 \
