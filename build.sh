@@ -584,6 +584,7 @@ build_ffmpeg() {
                 --enable-decoder=vp9 \
                 --enable-decoder=vc1 \
                 --enable-decoder=vvc \
+                --enable-decoder=utvideo \
                 --enable-decoder=aac \
                 --enable-decoder=aac_latm \
                 --enable-decoder=ac3 \
