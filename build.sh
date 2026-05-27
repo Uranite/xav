@@ -8,15 +8,36 @@
 set -Eeuo pipefail
 
 [[ "${OSTYPE}" == darwin* ]] && IS_MAC=true || IS_MAC=false
+[[ -n "${PREFIX:-}" && "${PREFIX}" == *com.termux* ]] && IS_TERMUX=true || IS_TERMUX=false
 "${IS_MAC}" && LLVM_PREFIX="$(brew --prefix llvm)" && export PATH="${LLVM_PREFIX}/bin:${PATH}"
 
 install_deps() {
         ((UID != 0)) && { for i in sudo doas; do command -v "${i}" > /dev/null 2>&1 && priv="${i}"; done; }
 
         pm="unknown"
-        for i in apt-get pacman dnf emerge brew; do command -v "${i}" > /dev/null 2>&1 && pm="${i}"; done
+        for i in pkg apt-get pacman dnf emerge brew; do command -v "${i}" > /dev/null 2>&1 && pm="${i}"; done
 
         case "${pm}" in
+                "pkg")
+                        if [[ "${IS_TERMUX}" == true ]]; then
+                                pkgs=(
+                                        build-essential rust nasm clang lld libcompiler-rt
+                                        autoconf automake libtool cmake ninja pkg-config
+                                        ffmpeg curl python vulkan-headers
+                                )
+                                pkg update
+                                pkg install -y "${pkgs[@]}"
+                                pip install meson
+                        else
+                                pkgs=(
+                                        build-essential rust nasm clang lld compiler-rt
+                                        autoconf automake libtool cmake ninja pkg-config
+                                        meson ffmpeg curl
+                                )
+                                pkg update
+                                pkg install -y "${pkgs[@]}"
+                        fi
+                        ;;
                 "apt-get")
                         pkgs=(
                                 build-essential rustup nasm clang llvm lld libclang-rt-dev
@@ -54,7 +75,7 @@ install_deps() {
                         ;;
         esac
 
-        command -v rustup > /dev/null 2>&1 && {
+        [[ "${IS_TERMUX}" == false ]] && command -v rustup > /dev/null 2>&1 && {
                 rustup-init || true
                 rustup toolchain install nightly
                 rustup default nightly
@@ -145,7 +166,11 @@ find_bin() {
 }
 
 detect_deps() {
-        SYS_LIB_DIRS=("/usr/lib64" "/usr/lib" "/usr/local/lib64" "/usr/local/lib" "/lib64" "/lib")
+        if [[ "${IS_TERMUX}" == true ]]; then
+                SYS_LIB_DIRS=("${PREFIX}/lib" "/usr/lib64" "/usr/lib" "/usr/local/lib64" "/usr/local/lib" "/lib64" "/lib")
+        else
+                SYS_LIB_DIRS=("/usr/lib64" "/usr/lib" "/usr/local/lib64" "/usr/local/lib" "/lib64" "/lib")
+        fi
         GCC_LIB_DIRS=()
         while IFS= read -r d; do
                 GCC_LIB_DIRS+=("${d}")
@@ -154,9 +179,15 @@ detect_deps() {
         CLANG_RT_DIR="$(clang --print-runtime-dir 2> /dev/null || true)"
         CLANG_LIB_DIRS=()
         [[ -n "${CLANG_RT_DIR}" && -d "${CLANG_RT_DIR}" ]] && CLANG_LIB_DIRS+=("${CLANG_RT_DIR}")
-        while IFS= read -r d; do
-                CLANG_LIB_DIRS+=("${d}")
-        done < <(find /usr/lib/clang /usr/lib64/clang -type d -name "linux" -o -type d -name "lib" 2> /dev/null || true)
+        if [[ "${IS_TERMUX}" == true ]]; then
+                while IFS= read -r d; do
+                        CLANG_LIB_DIRS+=("${d}")
+                done < <(find "${PREFIX}/lib/clang" -type d -name "linux" -o -type d -name "lib" 2> /dev/null || true)
+        else
+                while IFS= read -r d; do
+                        CLANG_LIB_DIRS+=("${d}")
+                done < <(find /usr/lib/clang /usr/lib64/clang -type d -name "linux" -o -type d -name "lib" 2> /dev/null || true)
+        fi
 
         ALL_STATIC_DIRS=("${SYS_LIB_DIRS[@]}" "${GCC_LIB_DIRS[@]}" "${CLANG_LIB_DIRS[@]}")
 
@@ -164,7 +195,7 @@ detect_deps() {
         RUSTC_VERSION=""
         [[ -n "${RUST_NIGHTLY_PATH}" ]] && {
                 RUSTC_VERSION="$(rustc --version 2> /dev/null || true)"
-                [[ "${RUSTC_VERSION}" == *nightly* ]] && HAS_RUST_NIGHTLY=true || HAS_RUST_NIGHTLY=false
+                [[ "${RUSTC_VERSION}" == *nightly* || "${IS_TERMUX}" == true ]] && HAS_RUST_NIGHTLY=true || HAS_RUST_NIGHTLY=false
         } || HAS_RUST_NIGHTLY=false
 
         NASM_PATH="$(find_bin nasm || true)"
@@ -185,6 +216,9 @@ detect_deps() {
 
         COMPILERRT_PATH="$(find_lib libclang_rt.builtins.a "${CLANG_LIB_DIRS[@]}" "${ALL_STATIC_DIRS[@]}" || true)"
         [[ -z "${COMPILERRT_PATH}" ]] && COMPILERRT_PATH="$(find_lib libclang_rt.builtins-x86_64.a "${CLANG_LIB_DIRS[@]}" "${ALL_STATIC_DIRS[@]}" || true)"
+        [[ -z "${COMPILERRT_PATH}" ]] && COMPILERRT_PATH="$(find_lib libclang_rt.builtins-aarch64-android.a "${CLANG_LIB_DIRS[@]}" "${ALL_STATIC_DIRS[@]}" || true)"
+        [[ -z "${COMPILERRT_PATH}" ]] && COMPILERRT_PATH="$(find_lib libclang_rt.builtins-arm-android.a "${CLANG_LIB_DIRS[@]}" "${ALL_STATIC_DIRS[@]}" || true)"
+        [[ -z "${COMPILERRT_PATH}" ]] && COMPILERRT_PATH="$(find_lib libclang_rt.builtins-aarch64.a "${CLANG_LIB_DIRS[@]}" "${ALL_STATIC_DIRS[@]}" || true)"
         [[ -n "${COMPILERRT_PATH}" ]] && HAS_COMPILERRT=true || HAS_COMPILERRT=false
 
         HAS_HARD_REQS=true
@@ -204,13 +238,20 @@ detect_deps() {
                 "/lib64"
                 "/lib"
         )
+        [[ "${IS_TERMUX}" == true ]] && VSHIP_SEARCH_DIRS=("${PREFIX}/lib" "${VSHIP_SEARCH_DIRS[@]}")
         VSHIP_STATIC_PATH="$(find_lib libvship.a "${VSHIP_SEARCH_DIRS[@]}" || true)"
         [[ -n "${VSHIP_STATIC_PATH}" ]] && HAS_VSHIP_STATIC=true || HAS_VSHIP_STATIC=false
 
         LLVM_LIB_DIRS=()
-        while IFS= read -r d; do
-                LLVM_LIB_DIRS+=("${d}")
-        done < <(find /usr/lib/llvm /usr/lib64/llvm -maxdepth 3 -type d -name "lib64" -o -type d -name "lib" 2> /dev/null || true)
+        if [[ "${IS_TERMUX}" == true ]]; then
+                while IFS= read -r d; do
+                        LLVM_LIB_DIRS+=("${d}")
+                done < <(find "${PREFIX}/lib/llvm" -maxdepth 3 -type d -name "lib64" -o -type d -name "lib" 2> /dev/null || true)
+        else
+                while IFS= read -r d; do
+                        LLVM_LIB_DIRS+=("${d}")
+                done < <(find /usr/lib/llvm /usr/lib64/llvm -maxdepth 3 -type d -name "lib64" -o -type d -name "lib" 2> /dev/null || true)
+        fi
 
         VSHIP_PATH="$(find_lib libvship.so "${SYS_LIB_DIRS[@]}" || true)"
         [[ -n "${VSHIP_PATH}" ]] && HAS_VSHIP=true || HAS_VSHIP=false
@@ -277,7 +318,10 @@ show_build_menu() {
         detect_deps
         [[ ! " ${ELIGIBLE[*]} " =~ " true " ]] && install_deps && detect_deps
 
-        for i in cargo ffmpeg clang pkgconf ninja meson cmake; do
+        local pkg_config_cmd="pkgconf"
+        command -v pkg-config > /dev/null 2>&1 && pkg_config_cmd="pkg-config"
+
+        for i in cargo ffmpeg clang "${pkg_config_cmd}" ninja meson cmake; do
                 command -v "${i}" > /dev/null 2>&1 || {
                         echo "Missing from PATH: ${i}"
                         echo "You should restart your terminal to update PATH"
@@ -386,7 +430,7 @@ clone_async() {
         local target="${1}" url="${2}" extra="${3:-}"
         [[ -d "${target}" ]] && return
         (
-                logfile="/tmp/clone_$(basename "${target}")_$$.log"
+                logfile="${TMPDIR:-/tmp}/clone_$(basename "${target}")_$$.log"
                 git clone ${extra} "${url}" "${target}" > "${logfile}" 2>&1
                 rm -f "${logfile}"
         ) &
@@ -406,8 +450,10 @@ clone_phase() {
         [[ -n "${svt_fork_branch:-}" ]] && svt_extra+=" --branch ${svt_fork_branch}"
         clone_async "${BUILD_DIR}/SVT-AV1" "${svt_fork_url}" "${svt_extra}"
         clone_async "${BUILD_DIR}/dav1d" "https://code.videolan.org/videolan/dav1d.git"
-        clone_async "${BUILD_DIR}/vulkan/Vulkan-Headers" "https://github.com/KhronosGroup/Vulkan-Headers.git" "--depth 1"
-        clone_async "${BUILD_DIR}/vulkan/Vulkan-Loader" "https://github.com/KhronosGroup/Vulkan-Loader.git" "--depth 1"
+        if [[ "${IS_TERMUX}" != true ]]; then
+                clone_async "${BUILD_DIR}/vulkan/Vulkan-Headers" "https://github.com/KhronosGroup/Vulkan-Headers.git" "--depth 1"
+                clone_async "${BUILD_DIR}/vulkan/Vulkan-Loader" "https://github.com/KhronosGroup/Vulkan-Loader.git" "--depth 1"
+        fi
         clone_async "${BUILD_DIR}/FFmpeg" "https://github.com/FFmpeg/FFmpeg"
 
         local pid rc=0
@@ -424,7 +470,7 @@ build_dav1d() {
 
         loginf b "Building dav1d"
 
-        local logfile="/tmp/build_dav1d_$.log"
+        local logfile="${TMPDIR:-/tmp}/build_dav1d_$.log"
         : > "${logfile}"
 
         cd "${BUILD_DIR}/dav1d"
@@ -437,12 +483,12 @@ build_dav1d() {
         ninja -C build >> "${logfile}" 2>&1
 
         mkdir -p "${BUILD_DIR}/dav1d/lib/pkgconfig"
-        cp "${BUILD_DIR}/dav1d/build/meson-private/dav1d.pc" "/tmp/dav1d.pc"
-        sed -i "s|prefix=/usr/local|prefix=${BUILD_DIR}/dav1d|g" "/tmp/dav1d.pc"
-        sed -i "s|includedir=\${prefix}/include|includedir=\${prefix}/include|g" "/tmp/dav1d.pc"
-        sed -i "s|libdir=\${prefix}/lib64|libdir=\${prefix}/build/src|g" "/tmp/dav1d.pc" 2> /dev/null || true
-        sed -i "s|libdir=\${prefix}/lib|libdir=\${prefix}/build/src|g" "/tmp/dav1d.pc" 2> /dev/null || true
-        cp /tmp/dav1d.pc "${BUILD_DIR}/dav1d/lib/pkgconfig/" && {
+        cp "${BUILD_DIR}/dav1d/build/meson-private/dav1d.pc" "${TMPDIR:-/tmp}/dav1d.pc"
+        sed -i "s|prefix=/usr/local|prefix=${BUILD_DIR}/dav1d|g" "${TMPDIR:-/tmp}/dav1d.pc"
+        sed -i "s|includedir=\${prefix}/include|includedir=\${prefix}/include|g" "${TMPDIR:-/tmp}/dav1d.pc"
+        sed -i "s|libdir=\${prefix}/lib64|libdir=\${prefix}/build/src|g" "${TMPDIR:-/tmp}/dav1d.pc" 2> /dev/null || true
+        sed -i "s|libdir=\${prefix}/lib|libdir=\${prefix}/build/src|g" "${TMPDIR:-/tmp}/dav1d.pc" 2> /dev/null || true
+        cp "${TMPDIR:-/tmp}/dav1d.pc" "${BUILD_DIR}/dav1d/lib/pkgconfig/" && {
                 rm -f "${logfile}"
                 loginf g "dav1d built successfully"
         } || {
@@ -454,11 +500,16 @@ build_dav1d() {
 }
 
 build_vulkan() {
+        if [[ "${IS_TERMUX}" == true ]]; then
+                loginf g "Using system Vulkan for Termux"
+                return
+        fi
+
         [[ -f "${BUILD_DIR}/vulkan/install/lib/pkgconfig/vulkan.pc" ]] && return
 
         loginf b "Building Vulkan (headers + loader)"
 
-        local logfile="/tmp/build_vulkan_$.log"
+        local logfile="${TMPDIR:-/tmp}/build_vulkan_$.log"
         local install_dir="${BUILD_DIR}/vulkan/install"
         : > "${logfile}"
 
@@ -518,15 +569,24 @@ build_ffmpeg() {
 
         loginf b "Building FFmpeg"
 
-        export PKG_CONFIG_PATH="${BUILD_DIR}/dav1d/lib/pkgconfig:${BUILD_DIR}/vulkan/install/lib/pkgconfig:${BUILD_DIR}/FFmpeg/install/lib/pkgconfig"
+        local vulkan_static_flag="--enable-vulkan-static"
+        if [[ "${IS_TERMUX}" == true ]]; then
+                export PKG_CONFIG_PATH="${BUILD_DIR}/dav1d/lib/pkgconfig:${BUILD_DIR}/FFmpeg/install/lib/pkgconfig"
+                local extra_cflags="${CFLAGS}"
+                local extra_ldflags="-fuse-ld=lld -flto=thin"
+                vulkan_static_flag=""
+        else
+                export PKG_CONFIG_PATH="${BUILD_DIR}/dav1d/lib/pkgconfig:${BUILD_DIR}/vulkan/install/lib/pkgconfig:${BUILD_DIR}/FFmpeg/install/lib/pkgconfig"
+                local vk_inc="${BUILD_DIR}/vulkan/install/include"
+                local vk_lib="${BUILD_DIR}/vulkan/install/lib"
+                local extra_cflags="${CFLAGS} -I${vk_inc}"
+                local extra_ldflags="-fuse-ld=lld -flto=thin -L${vk_lib}"
+        fi
 
-        local logfile="/tmp/build_ffmpeg_$.log"
+        local logfile="${TMPDIR:-/tmp}/build_ffmpeg_$.log"
         : > "${logfile}"
 
         cd "${BUILD_DIR}/FFmpeg"
-
-        local vk_inc="${BUILD_DIR}/vulkan/install/include"
-        local vk_lib="${BUILD_DIR}/vulkan/install/lib"
 
         ./configure \
                 --cc="${CC}" \
@@ -535,9 +595,9 @@ build_ffmpeg() {
                 --nm="${NM}" \
                 --ranlib="${RANLIB}" \
                 --strip="${STRIP}" \
-                --extra-cflags="${CFLAGS} -I${vk_inc}" \
-                --extra-cxxflags="${CXXFLAGS} -I${vk_inc}" \
-                --extra-ldflags="-fuse-ld=lld -flto=thin -L${vk_lib}" \
+                --extra-cflags="${extra_cflags}" \
+                --extra-cxxflags="${extra_cflags}" \
+                --extra-ldflags="${extra_ldflags}" \
                 --disable-shared \
                 --enable-static \
                 --pkg-config-flags="--static" \
@@ -641,7 +701,7 @@ build_ffmpeg() {
                 --enable-parser=vorbis \
                 --enable-parser=flac \
                 --enable-vulkan \
-                --enable-vulkan-static \
+                ${vulkan_static_flag} \
                 --enable-hwaccel=h264_vulkan \
                 --enable-hwaccel=hevc_vulkan \
                 --enable-hwaccel=av1_vulkan \
@@ -671,7 +731,7 @@ build_opus() {
 
         loginf b "Building opus"
 
-        local logfile="/tmp/build_opus_$.log"
+        local logfile="${TMPDIR:-/tmp}/build_opus_$.log"
         : > "${logfile}"
 
         cd "${BUILD_DIR}/opus"
@@ -704,7 +764,7 @@ build_opusenc() {
 
         loginf b "Building libopusenc"
 
-        local logfile="/tmp/build_opusenc_$.log"
+        local logfile="${TMPDIR:-/tmp}/build_opusenc_$.log"
         : > "${logfile}"
 
         cd "${BUILD_DIR}/libopusenc"
@@ -736,7 +796,7 @@ build_svtav1() {
 
         loginf b "Building SVT-AV1 (${svt_fork_name})"
 
-        local logfile="/tmp/build_svtav1_$.log"
+        local logfile="${TMPDIR:-/tmp}/build_svtav1_$.log"
         local pgo_dir="${BUILD_DIR}/SVT-AV1/pgo"
         : > "${logfile}"
 
@@ -963,7 +1023,7 @@ main() {
 
         loginf b "Building XAV"
 
-        local logfile="/tmp/build_cargo_$.log"
+        local logfile="${TMPDIR:-/tmp}/build_cargo_$.log"
 
         cargo build --release ${cargo_features} > "${logfile}" 2>&1 && {
                 rm -f "${logfile}"
