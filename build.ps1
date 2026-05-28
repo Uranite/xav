@@ -394,6 +394,11 @@ function Build-Vship {
 function Build-SvtAv1 {
     param([string]$Variant, [string]$Dir, [string]$Branch, [string]$Repo, [string]$ExtraCFlags, [string]$ArchFlags)
 
+    if (Test-Path 'lib\SvtAv1Enc.lib') {
+        Write-Host '[INFO] SVT-AV1 already compiled. Skipping...' -ForegroundColor Cyan
+        return
+    }
+
     $avx512Supported = Get-Avx512Supported
     $svtAvx512Flag = if ($avx512Supported) { 'ON' } else { 'OFF' }
     Write-Host "[INFO] Detected AVX512 support: $avx512Supported. SVT-AV1 will be built with -DENABLE_AVX512=$svtAvx512Flag." -ForegroundColor Cyan
