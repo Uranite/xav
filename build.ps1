@@ -395,8 +395,13 @@ function Build-SvtAv1 {
     param([string]$Variant, [string]$Dir, [string]$Branch, [string]$Repo, [string]$ExtraCFlags, [string]$ArchFlags)
 
     if (Test-Path 'lib\SvtAv1Enc.lib') {
-        Write-Host '[INFO] SVT-AV1 already compiled. Skipping...' -ForegroundColor Cyan
-        return
+        Write-Host ""
+        Write-Host "[PROMPT] $Variant is already compiled." -ForegroundColor Yellow
+        $choice = Read-Host "Do you want to update and recompile $Variant? (Y/N) [Default: N]"
+        if ($choice -notmatch '^[Yy]') {
+            Write-Host "[INFO] Skipping $Variant compilation..." -ForegroundColor Cyan
+            return
+        }
     }
 
     $avx512Supported = Get-Avx512Supported
@@ -404,7 +409,14 @@ function Build-SvtAv1 {
     Write-Host "[INFO] Detected AVX512 support: $avx512Supported. SVT-AV1 will be built with -DENABLE_AVX512=$svtAvx512Flag." -ForegroundColor Cyan
 
     if (Test-Path $Dir) {
-        Push-Location $Dir; git pull; Pop-Location
+        Push-Location $Dir
+        git pull
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[WARNING] git pull failed. Forcing sync with remote..." -ForegroundColor Yellow
+            git fetch
+            git reset --hard '@{u}'
+        }
+        Pop-Location
     }
     else {
         if ($Branch) {
