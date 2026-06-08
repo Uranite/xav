@@ -428,79 +428,101 @@ function Build-SvtAv1 {
         }
     }
     Push-Location $Dir
-    $pgoDir = "$PWD/svt_pgo_data"
-    if (Test-Path $pgoDir) { Remove-Item -Recurse -Force $pgoDir }
-    New-Item -ItemType Directory $pgoDir | Out-Null
 
-    if (Test-Path svt_build_gen) { Remove-Item -Recurse -Force svt_build_gen }
+    Write-Host ""
+    $pgoChoice = Read-Host "Do you want to compile ${Variant} with PGO? (Y/N) [Default: Y]"
+    $usePgo = ($pgoChoice -notmatch '^[Nn]')
 
-    Invoke-Step "Configuring $Variant (PGO Gen)" {
-        cmake -B svt_build_gen -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF `
-            -DSVT_AV1_LTO=OFF -DLIBDOVI_FOUND=0 -DLIBHDR10PLUS_RS_FOUND=0 -DENABLE_AVX512=$svtAvx512Flag `
-            -DCMAKE_CXX_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -fprofile-generate=$pgoDir" `
-            -DCMAKE_C_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -fprofile-generate=$pgoDir" `
-            -DLOG_QUIET=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_OUTPUT_DIRECTORY=svt_build_gen
-    }
+    if ($usePgo) {
+        $pgoDir = "$PWD/svt_pgo_data"
+        if (Test-Path $pgoDir) { Remove-Item -Recurse -Force $pgoDir }
+        New-Item -ItemType Directory $pgoDir | Out-Null
 
-    Invoke-Step "Building $Variant (PGO Gen)" { ninja -C svt_build_gen }
+        if (Test-Path svt_build_gen) { Remove-Item -Recurse -Force svt_build_gen }
 
-    $clipFile = @("y4m", "mkv", "mp4", "webm") |
-    ForEach-Object { "..\pgo_clip.$_" } |
-    Where-Object { Test-Path $_ } |
-    Select-Object -First 1
-
-    if ($clipFile) {
-        Write-Host "[INFO] $clipFile found. Using it for PGO." -ForegroundColor Cyan
-    }
-    else {
-        $clipUrl = "https://media.xiph.org/video/derf/webm/Netflix_FoodMarket2_4096x2160_60fps_10bit_420.webm"
-        $clipHash = "F625E9460AA7964855D00C4CAD535D910EC4EEC7594B4CCEB5611CB00CC5F75B"
-        $clipFile = "Netflix_FoodMarket2_4096x2160_60fps_10bit_420.webm"
-
-        if (-not (Test-Path "..\$clipFile")) {
-            Write-Host "[INFO] Downloading PGO clip..." -ForegroundColor Cyan
-            Invoke-WebRequest -Uri $clipUrl -OutFile "..\$clipFile"
+        Invoke-Step "Configuring $Variant (PGO Gen)" {
+            cmake -B svt_build_gen -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF `
+                -DSVT_AV1_LTO=OFF -DLIBDOVI_FOUND=0 -DLIBHDR10PLUS_RS_FOUND=0 -DENABLE_AVX512=$svtAvx512Flag `
+                -DCMAKE_CXX_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -fprofile-generate=$pgoDir" `
+                -DCMAKE_C_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -fprofile-generate=$pgoDir" `
+                -DLOG_QUIET=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_OUTPUT_DIRECTORY=svt_build_gen
         }
 
-        $actualHash = (Get-FileHash "..\$clipFile" -Algorithm SHA256).Hash
-        if ($actualHash -ne $clipHash) {
-            Write-Host "[ERROR] PGO clip hash mismatch. Expected $clipHash, got $actualHash." -ForegroundColor Red
-            exit 1
-        }
+        Invoke-Step "Building $Variant (PGO Gen)" { ninja -C svt_build_gen }
 
-        if (-not (Test-Path "..\Netflix_FoodMarket2_1920x1080_60fps_10bit_420_96f.y4m")) {
-            & "..\FFmpeg\ffmpeg.exe" -hide_banner -v error -stats -y -nostdin -i "..\$clipFile" -frames:v 96 -vf "scale=1920:1080:flags=lanczos+accurate_rnd+full_chroma_int:param0=4" -pix_fmt yuv420p10le -strict -1 -f yuv4mpegpipe "..\Netflix_FoodMarket2_1920x1080_60fps_10bit_420_96f.y4m"
-        }
-        $clipFile = "..\Netflix_FoodMarket2_1920x1080_60fps_10bit_420_96f.y4m"
-    }
+        $clipFile = @("y4m", "mkv", "mp4", "webm") |
+        ForEach-Object { "..\pgo_clip.$_" } |
+        Where-Object { Test-Path $_ } |
+        Select-Object -First 1
 
-    Invoke-Step "PGO Run for $Variant" {
-        if ($clipFile -notlike '*.y4m') {
-            & "..\FFmpeg\ffmpeg.exe" -i "$clipFile" -f yuv4mpegpipe -pix_fmt yuv420p10le -strict -1 - | & ".\svt_build_gen\SvtAv1EncApp.exe" -i - -b NUL --preset 3 | Out-Host
+        if ($clipFile) {
+            Write-Host "[INFO] $clipFile found. Using it for PGO." -ForegroundColor Cyan
         }
         else {
-            & ".\svt_build_gen\SvtAv1EncApp.exe" -i "$clipFile" -b NUL --preset 3 | Out-Host
+            $clipUrl = "https://media.xiph.org/video/derf/webm/Netflix_FoodMarket2_4096x2160_60fps_10bit_420.webm"
+            $clipHash = "F625E9460AA7964855D00C4CAD535D910EC4EEC7594B4CCEB5611CB00CC5F75B"
+            $clipFile = "Netflix_FoodMarket2_4096x2160_60fps_10bit_420.webm"
+
+            if (-not (Test-Path "..\$clipFile")) {
+                Write-Host "[INFO] Downloading PGO clip..." -ForegroundColor Cyan
+                Invoke-WebRequest -Uri $clipUrl -OutFile "..\$clipFile"
+            }
+
+            $actualHash = (Get-FileHash "..\$clipFile" -Algorithm SHA256).Hash
+            if ($actualHash -ne $clipHash) {
+                Write-Host "[ERROR] PGO clip hash mismatch. Expected $clipHash, got $actualHash." -ForegroundColor Red
+                exit 1
+            }
+
+            if (-not (Test-Path "..\Netflix_FoodMarket2_1920x1080_60fps_10bit_420_96f.y4m")) {
+                & "..\FFmpeg\ffmpeg.exe" -hide_banner -v error -stats -y -nostdin -i "..\$clipFile" -frames:v 96 -vf "scale=1920:1080:flags=lanczos+accurate_rnd+full_chroma_int:param0=4" -pix_fmt yuv420p10le -strict -1 -f yuv4mpegpipe "..\Netflix_FoodMarket2_1920x1080_60fps_10bit_420_96f.y4m"
+            }
+            $clipFile = "..\Netflix_FoodMarket2_1920x1080_60fps_10bit_420_96f.y4m"
         }
+
+        Invoke-Step "PGO Run for $Variant" {
+            if ($clipFile -notlike '*.y4m') {
+                & "..\FFmpeg\ffmpeg.exe" -i "$clipFile" -f yuv4mpegpipe -pix_fmt yuv420p10le -strict -1 - | & ".\svt_build_gen\SvtAv1EncApp.exe" -i - -b NUL --preset 3 | Out-Host
+            }
+            else {
+                & ".\svt_build_gen\SvtAv1EncApp.exe" -i "$clipFile" -b NUL --preset 3 | Out-Host
+            }
+        }
+
+        $profdata = "$pgoDir/default.profdata"
+        Invoke-Step "Merging PGO data" {
+            & "llvm-profdata" merge --sparse=true -o $profdata $pgoDir | Out-Host
+        }
+
+        if (Test-Path svt_build_use) { Remove-Item -Recurse -Force svt_build_use }
+
+        Invoke-Step "Configuring $Variant (PGO Use)" {
+            cmake -B svt_build_use -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF `
+                -DSVT_AV1_LTO=OFF -DLIBDOVI_FOUND=0 -DLIBHDR10PLUS_RS_FOUND=0 -DENABLE_AVX512=$svtAvx512Flag `
+                -DCMAKE_CXX_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -fprofile-use=$profdata" `
+                -DCMAKE_C_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -fprofile-use=$profdata" `
+                -DLOG_QUIET=ON -DBUILD_APPS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_OUTPUT_DIRECTORY=svt_build_use
+        }
+
+        Invoke-Step "Building $Variant (PGO Use)" { ninja -C svt_build_use }
+        Pop-Location
+        Copy-Item "$Dir\svt_build_use\SvtAv1Enc.lib" lib\ -Force
     }
+    else {
+        if (Test-Path svt_build) { Remove-Item -Recurse -Force svt_build }
 
-    $profdata = "$pgoDir/default.profdata"
-    Invoke-Step "Merging PGO data" {
-        & "llvm-profdata" merge --sparse=true -o $profdata $pgoDir | Out-Host
+        Invoke-Step "Configuring $Variant (No PGO)" {
+            cmake -B svt_build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF `
+                -DSVT_AV1_LTO=OFF -DLIBDOVI_FOUND=0 -DLIBHDR10PLUS_RS_FOUND=0 -DENABLE_AVX512=$svtAvx512Flag `
+                -DCMAKE_CXX_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags" `
+                -DCMAKE_C_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags" `
+                -DLOG_QUIET=ON -DBUILD_APPS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_OUTPUT_DIRECTORY=svt_build
+        }
+
+        Invoke-Step "Building $Variant (No PGO)" { ninja -C svt_build }
+        Pop-Location
+        Copy-Item "$Dir\svt_build\SvtAv1Enc.lib" lib\ -Force
     }
-
-    if (Test-Path svt_build_use) { Remove-Item -Recurse -Force svt_build_use }
-
-    Invoke-Step "Configuring $Variant (PGO Use)" {
-        cmake -B svt_build_use -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF `
-            -DSVT_AV1_LTO=OFF -DLIBDOVI_FOUND=0 -DLIBHDR10PLUS_RS_FOUND=0 -DENABLE_AVX512=$svtAvx512Flag `
-            -DCMAKE_CXX_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -fprofile-use=$profdata" `
-            -DCMAKE_C_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -fprofile-use=$profdata" `
-            -DLOG_QUIET=ON -DBUILD_APPS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_OUTPUT_DIRECTORY=svt_build_use
-    }
-
-    Invoke-Step "Building $Variant (PGO Use)" { ninja -C svt_build_use }
-    Pop-Location
-    Copy-Item "$Dir\svt_build_use\SvtAv1Enc.lib" lib\ -Force
 }
 
 function Build-Opus {
