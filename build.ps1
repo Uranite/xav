@@ -713,9 +713,15 @@ function Build-FFmpeg {
         Write-Host "[INFO] FFmpeg already compiled. Skipping..." -ForegroundColor Cyan
     }
     else {
-        if (Test-Path 'FFmpeg') { Push-Location FFmpeg; git pull; Pop-Location }
+        if (Test-Path 'FFmpeg') {
+            Push-Location FFmpeg
+            git reset --hard
+            git pull
+            Pop-Location
+        }
         else { git clone --depth 1 https://github.com/FFmpeg/FFmpeg.git }
         Push-Location FFmpeg
+        git apply "..\patch\ffmpeg.patch"
         Invoke-Step "Building FFmpeg" {
             $bashScript = @'
 #!/bin/sh
@@ -726,11 +732,8 @@ sed -i "s|^libdir=.*|libdir=\${prefix}/src|" $(pwd)/../dav1d/build/meson-private
 sed -i "s|^includedir=.*|includedir=\${prefix}/../include|" $(pwd)/../dav1d/build/meson-private/dav1d.pc
 sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../dav1d/build/meson-private/dav1d.pc
 
-sed -i 's/if test "$cc_type" = "clang"; then/if true; then/' configure
-sed -i 's/test "$cc_type" != "$ld_type" && die "LTO requires same compiler and linker"/true/' configure
+# i forgot what this does
 # sed -i 's/-L\*) \[ "$_flags_type" = "link" \] && echo -libpath:${flag#-L} ;;/-L*) [ "$_flags_type" = "link" ] \&\& echo -libpath:${flag#-L} ;; -I*) [ "$_flags_type" = "link" ] || echo $flag ;;/g' configure
-# Don't treat lld-link warnings as link failure 🤤
-sed -i "s/grep -qE 'LNK4044|lld-link: warning: ignoring unknown argument'/false/" configure
 ./configure \
     --disable-all \
     --disable-everything \
