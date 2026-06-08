@@ -397,7 +397,7 @@ function Build-SvtAv1 {
     if (Test-Path 'lib\SvtAv1Enc.lib') {
         Write-Host ""
         Write-Host "[PROMPT] $Variant is already compiled." -ForegroundColor Yellow
-        $choice = Read-Host "Do you want to update and recompile $Variant? (Y/N) [Default: N]"
+        $choice = Read-Host "Do you want to update and recompile ${Variant}? (Y/N) [Default: N]"
         if ($choice -notmatch '^[Yy]') {
             Write-Host "[INFO] Skipping $Variant compilation..." -ForegroundColor Cyan
             return
