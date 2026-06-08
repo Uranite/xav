@@ -569,9 +569,12 @@ function Build-Libopusenc {
         else { git clone --depth 1 https://gitlab.xiph.org/xiph/libopusenc.git }
         Push-Location libopusenc
         Invoke-Step "Building libopusenc (MSYS2)" {
-            $bashScript = @'
+            $llvmBinWin = Split-Path (Get-Command clang.exe).Definition
+            $bashScript = @"
 #!/bin/sh
 set -e
+export PATH="`$(cygpath -u '$llvmBinWin'):`$PATH"
+"@ + "`n" + @'
 ./autogen.sh
 ./configure CC="clang" CXX="clang++" \
     CFLAGS="-O3 -flto=thin -fuse-ld=lld -march=native" \
@@ -737,9 +740,12 @@ function Build-FFmpeg {
         Push-Location FFmpeg
         git apply "..\patch\ffmpeg.patch"
         Invoke-Step "Building FFmpeg" {
-            $bashScript = @'
+            $llvmBinWin = Split-Path (Get-Command clang.exe).Definition
+            $bashScript = @"
 #!/bin/sh
 set -e
+export PATH="`$(cygpath -u '$llvmBinWin'):`$PATH"
+"@ + "`n" + @'
 export PKG_CONFIG_PATH="$(pwd)/../dav1d/build/meson-private:$(pwd)/../vulkan/install/lib/pkgconfig"
 sed -i "s|^prefix=.*|prefix=$(pwd)/../dav1d/build|" $(pwd)/../dav1d/build/meson-private/dav1d.pc
 sed -i "s|^libdir=.*|libdir=\${prefix}/src|" $(pwd)/../dav1d/build/meson-private/dav1d.pc
