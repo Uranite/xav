@@ -429,6 +429,17 @@ function Build-SvtAv1 {
     }
     Push-Location $Dir
 
+    $svtThreadsFile = 'Source\Lib\Codec\svt_threads.c'
+    $content = Get-Content -Raw $svtThreadsFile
+    $content = $content.Replace('1 MiB', '8 MiB').Replace('const size_t min_stack_size = 1024 * 1024;', 'const size_t min_stack_size = 8 * 1024 * 1024;')
+    $content = $content.Replace('0, // default stack size', '8 * 1024 * 1024, // default stack size').Replace('0, // thread active when created', 'STACK_SIZE_PARAM_IS_A_RESERVATION, // thread active when created')
+    Set-Content -Path $svtThreadsFile -Value $content -NoNewline
+
+    $encInterFile = 'Source\Lib\Codec\enc_inter_prediction.c'
+    $content = Get-Content -Raw $encInterFile
+    $content = $content.Replace('void NOINLINE svt_aom_enc_make_inter_predictor(', 'void svt_aom_enc_make_inter_predictor(')
+    Set-Content -Path $encInterFile -Value $content -NoNewline
+
     Write-Host ""
     $pgoChoice = Read-Host "Do you want to compile ${Variant} with PGO? (Y/N) [Default: Y]"
     $usePgo = ($pgoChoice -notmatch '^[Nn]')
