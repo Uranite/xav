@@ -338,7 +338,6 @@ function Build-Vship {
     else {
         if (Test-Path 'Vship') {
             Push-Location Vship
-            git reset --hard
             git pull
             Pop-Location
         }
@@ -346,7 +345,6 @@ function Build-Vship {
             git clone --depth 300 https://codeberg.org/Line-fr/Vship.git
         }
         Push-Location Vship
-        git apply "..\patch\vship.patch"
 
         switch ($Backend) {
             'cuda' {
