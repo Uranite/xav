@@ -61,8 +61,20 @@ fn build_windows() {
                 "deint_nv12",
                 "deint_nv12_10b",
                 "shift_p010",
+                "nal_scan",
             ] {
                 b.file(format!("asm/{set}/{k}.asm"));
+            }
+            for k in [
+                "pack",
+                "unpack",
+                "conv",
+                "deint_p010",
+                "deint_nv12",
+                "deint_nv12_10b",
+                "shift_p010",
+            ] {
+                b.file(format!("asm/{set}/rem/{k}_rem.asm"));
             }
             for k in [
                 "crop_row_stats_u8",
@@ -75,6 +87,16 @@ fn build_windows() {
             }
             for k in ["pchip", "fc_spline", "lerp", "bs"] {
                 b.file(format!("asm/avx2/{k}.asm"));
+            }
+            if set == "avx512" {
+                b.file("asm/avx512/crc32.asm");
+                b.file("asm/avx512/crc32_combine.asm");
+            } else if set == "avx2" && has("vpclmulqdq") {
+                b.file("asm/avx2/crc32.asm");
+                b.file("asm/avx2/crc32_combine.asm");
+            } else if set == "avx2" && has("pclmulqdq") {
+                b.file("asm/avx2/crc32_pclmul.asm");
+                b.file("asm/avx2/crc32_combine.asm");
             }
             b.compile("xavasm").unwrap_or_else(|e| {
                 println!("cargo:warning=nasm: {e}");
