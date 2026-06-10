@@ -115,12 +115,12 @@ pub struct EbSvtAv1EncConfiguration {
     pub encoder_bit_depth: u32,
     pub encoder_color_format: i32,
     #[cfg(feature = "5fish")]
-    pub high_dynamic_range_input: u8,
+    high_dynamic_range_input: u8,
     pub profile: i32,
     tier: u32,
     level: u32,
     #[cfg(feature = "5fish")]
-    pub color_description_present_flag: bool,
+    color_description_present_flag: bool,
     pub color_primaries: i32,
     pub transfer_characteristics: i32,
     pub matrix_coefficients: i32,
@@ -166,7 +166,7 @@ pub struct EbSvtAv1EncConfiguration {
     enable_mfmv: i32,
     pub scene_change_detection: u32,
     #[cfg(feature = "5fish")]
-    pub restricted_motion_vector: bool,
+    restricted_motion_vector: bool,
     tile_columns: i32,
     tile_rows: i32,
     look_ahead_distance: u32,
