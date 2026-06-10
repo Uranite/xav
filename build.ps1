@@ -933,6 +933,9 @@ function Build-Xav {
     if ($SvtChoice -eq '3') {
         $features += ",5fish"
     }
+    elseif ($SvtChoice -eq '2' -or $SvtChoice -eq '6') {
+        $features += ",svt-essential"
+    }
 
     Invoke-Step "Cargo build ($Backend)" {
         cargo update
