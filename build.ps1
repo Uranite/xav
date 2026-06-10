@@ -881,7 +881,6 @@ make -j$(nproc)
         Copy-Item 'FFmpeg\libavformat\avformat.lib' 'lib\avformat.lib' -Force
         Copy-Item 'FFmpeg\libavutil\avutil.lib' 'lib\avutil.lib' -Force
         Copy-Item 'FFmpeg\libswresample\swresample.lib' 'lib\swresample.lib' -Force
-        Copy-Item 'FFmpeg\libswscale\swscale.lib' 'lib\swscale.lib' -Force
     }
 }
 
