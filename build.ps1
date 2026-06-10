@@ -784,6 +784,7 @@ sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../d
     --enable-swscale \
     --enable-swresample \
     --enable-protocol=file \
+    --enable-protocol=pipe \
     --enable-demuxer=matroska \
     --enable-demuxer=mov \
     --enable-demuxer=mpegts \
