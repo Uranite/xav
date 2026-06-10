@@ -272,28 +272,6 @@ pub struct EbSvtAv1EncConfiguration {
     #[cfg(feature = "5fish")]
     noise_norm_strength: u8,
     ac_bias: f64,
-    #[cfg(feature = "5fish")]
-    tx_bias: u8,
-    #[cfg(feature = "5fish")]
-    low_q_taper: bool,
-    #[cfg(feature = "5fish")]
-    sharp_tx: bool,
-    #[cfg(feature = "5fish")]
-    hbd_mds: u8,
-    #[cfg(feature = "5fish")]
-    complex_hvs: u8,
-    #[cfg(feature = "5fish")]
-    alt_ssim_tuning: bool,
-    #[cfg(feature = "5fish")]
-    filtering_noise_detection: u8,
-    #[cfg(feature = "5fish")]
-    auto_tiling: bool,
-    #[cfg(feature = "5fish")]
-    photon_noise_iso: u32,
-    #[cfg(feature = "5fish")]
-    enable_photon_noise_chroma: u8,
-    #[cfg(feature = "5fish")]
-    color_range_provided: bool,
     _padding: [u8; 128],
 }
 
