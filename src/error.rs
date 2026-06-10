@@ -50,6 +50,8 @@ impl From<String> for Xerr {
     }
 }
 
+#[cold]
+#[inline(never)]
 pub fn restore_screen() {
     if IN_ALT_SCREEN.swap(false, Relaxed) {
         print!("\x1b[?25h\x1b[?1049l");
