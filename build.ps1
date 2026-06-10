@@ -760,8 +760,8 @@ sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../d
     --cxx="clang-cl" \
     --ld="lld-link" \
     --ar="llvm-ar" \
-    --ranlib="llvm-ranlib" \
     --nm="llvm-nm" \
+    --ranlib="llvm-ranlib" \
     --strip="llvm-strip" \
     --toolchain="msvc" \
     --enable-lto="thin" \
@@ -770,11 +770,8 @@ sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../d
     --disable-shared \
     --enable-static \
     --pkg-config-flags="--static" \
+    --disable-programs \
     --disable-doc \
-    --disable-htmlpages \
-    --disable-manpages \
-    --disable-podpages \
-    --disable-txtpages \
     --disable-network \
     --disable-autodetect \
     --disable-debug \
@@ -798,7 +795,6 @@ sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../d
     --enable-demuxer=ivf \
     --enable-demuxer=yuv4mpegpipe \
     --enable-muxer=yuv4mpegpipe \
-    --enable-muxer=null \
     --enable-demuxer=h264 \
     --enable-demuxer=hevc \
     --enable-demuxer=vvc \
@@ -880,15 +876,10 @@ sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../d
     --enable-hwaccel=hevc_vulkan \
     --enable-hwaccel=av1_vulkan \
     --enable-hwaccel=vp9_vulkan \
-    --enable-filter=scale \
-    --enable-filter=format \
-    --enable-muxer=matroska \
-    --enable-muxer=webm \
-    --enable-muxer=mp4 \
-    --enable-muxer=ivf \
     --enable-bsf=extract_extradata \
-    --enable-bsf=aac_adtstoasc \
-    --enable-demuxer=ogg
+    --enable-demuxer=ogg \
+    --enable-filter=scale \
+    --enable-filter=format
 make -j$(nproc)
 '@
             Set-Content -Path 'build_ffmpeg.sh' -Value $bashScript -Encoding Ascii
@@ -901,7 +892,6 @@ make -j$(nproc)
         Copy-Item 'FFmpeg\libavformat\avformat.lib' 'lib\avformat.lib' -Force
         Copy-Item 'FFmpeg\libavutil\avutil.lib' 'lib\avutil.lib' -Force
         Copy-Item 'FFmpeg\libswresample\swresample.lib' 'lib\swresample.lib' -Force
-        Copy-Item 'FFmpeg\libswscale\swscale.lib' 'lib\swscale.lib' -Force
     }
 }
 
