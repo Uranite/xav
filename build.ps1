@@ -774,9 +774,14 @@ sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../d
     --disable-network \
     --disable-autodetect \
     --disable-debug \
+    --enable-ffmpeg \
+    --disable-ffprobe \
+    --disable-ffplay \
     --enable-avcodec \
     --enable-avformat \
     --enable-avutil \
+    --enable-avfilter \
+    --enable-swscale \
     --enable-swresample \
     --enable-protocol=file \
     --enable-demuxer=matroska \
@@ -787,11 +792,13 @@ sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../d
     --enable-demuxer=avi \
     --enable-demuxer=ivf \
     --enable-demuxer=yuv4mpegpipe \
+    --enable-muxer=yuv4mpegpipe \
     --enable-demuxer=h264 \
     --enable-demuxer=hevc \
     --enable-demuxer=vvc \
     --enable-decoder=ffv1 \
     --enable-decoder=rawvideo \
+    --enable-encoder=wrapped_avframe \
     --enable-decoder=h264 \
     --enable-decoder=hevc \
     --enable-decoder=mpeg2video \
@@ -868,7 +875,9 @@ sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../d
     --enable-hwaccel=av1_vulkan \
     --enable-hwaccel=vp9_vulkan \
     --enable-bsf=extract_extradata \
-    --enable-demuxer=ogg
+    --enable-demuxer=ogg \
+    --enable-filter=scale \
+    --enable-filter=format
 make -j$(nproc)
 '@
             Set-Content -Path 'build_ffmpeg.sh' -Value $bashScript -Encoding Ascii
