@@ -759,8 +759,8 @@ sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../d
     --cxx="clang-cl" \
     --ld="lld-link" \
     --ar="llvm-ar" \
-    --ranlib="llvm-ranlib" \
     --nm="llvm-nm" \
+    --ranlib="llvm-ranlib" \
     --strip="llvm-strip" \
     --toolchain="msvc" \
     --enable-lto="thin" \
@@ -769,25 +769,16 @@ sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../d
     --disable-shared \
     --enable-static \
     --pkg-config-flags="--static" \
+    --disable-programs \
     --disable-doc \
-    --disable-htmlpages \
-    --disable-manpages \
-    --disable-podpages \
-    --disable-txtpages \
     --disable-network \
     --disable-autodetect \
     --disable-debug \
-    --enable-ffmpeg \
-    --disable-ffprobe \
-    --disable-ffplay \
     --enable-avcodec \
     --enable-avformat \
     --enable-avutil \
-    --enable-avfilter \
-    --enable-swscale \
     --enable-swresample \
     --enable-protocol=file \
-    --enable-protocol=pipe \
     --enable-demuxer=matroska \
     --enable-demuxer=mov \
     --enable-demuxer=mpegts \
@@ -796,14 +787,11 @@ sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../d
     --enable-demuxer=avi \
     --enable-demuxer=ivf \
     --enable-demuxer=yuv4mpegpipe \
-    --enable-muxer=yuv4mpegpipe \
-    --enable-muxer=null \
     --enable-demuxer=h264 \
     --enable-demuxer=hevc \
     --enable-demuxer=vvc \
     --enable-decoder=ffv1 \
     --enable-decoder=rawvideo \
-    --enable-encoder=wrapped_avframe \
     --enable-decoder=h264 \
     --enable-decoder=hevc \
     --enable-decoder=mpeg2video \
@@ -879,14 +867,7 @@ sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../d
     --enable-hwaccel=hevc_vulkan \
     --enable-hwaccel=av1_vulkan \
     --enable-hwaccel=vp9_vulkan \
-    --enable-filter=scale \
-    --enable-filter=format \
-    --enable-muxer=matroska \
-    --enable-muxer=webm \
-    --enable-muxer=mp4 \
-    --enable-muxer=ivf \
     --enable-bsf=extract_extradata \
-    --enable-bsf=aac_adtstoasc \
     --enable-demuxer=ogg
 make -j$(nproc)
 '@
