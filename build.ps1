@@ -342,7 +342,7 @@ function Build-Vship {
             Pop-Location
         }
         else {
-            git clone --depth 300 https://codeberg.org/Line-fr/Vship.git
+            git clone --depth 1 https://codeberg.org/Line-fr/Vship.git
         }
         Push-Location Vship
 
