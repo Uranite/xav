@@ -1,6 +1,18 @@
 #Requires -Version 5.1
+[CmdletBinding()]
+param (
+    [switch]$ForceRebuild,
+    [switch]$EnableTQ,
+    [string]$Backend = "cuda",
+    [int]$SvtVariantId = 1,
+    [int]$ArchChoiceId = 1,
+    [switch]$NoPrompt
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$COMMON_FLAGS = "-flto=thin -O3 -DNDEBUG -march=native"
 
 function Install-Cuda129 {
     $url = 'https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_576.57_windows.exe'
@@ -528,7 +540,7 @@ function Build-Opus {
         Invoke-Step "Configuring Opus" {
             cmake -B build -G Ninja `
                 -DCMAKE_BUILD_TYPE=Release `
-                -DCMAKE_C_FLAGS_RELEASE="-flto=thin -O3 -DNDEBUG -march=native" `
+                -DCMAKE_C_FLAGS_RELEASE="$COMMON_FLAGS" `
                 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
         }
         Invoke-Step "Building Opus" { ninja -C build }
@@ -555,8 +567,8 @@ export PATH="`$(cygpath -u '$llvmBinWin'):`$PATH"
 "@ + "`n" + @'
 ./autogen.sh
 ./configure CC="clang" CXX="clang++" \
-    CFLAGS="-O3 -flto=thin -fuse-ld=lld -march=native" \
-    LDFLAGS="-O3 -flto=thin -fuse-ld=lld -march=native" \
+    CFLAGS="$COMMON_FLAGS -fuse-ld=lld" \
+    LDFLAGS="$COMMON_FLAGS -fuse-ld=lld" \
     AR="llvm-ar" RANLIB="llvm-ranlib" \
     DEPS_CFLAGS="-I../opus/include" \
     DEPS_LIBS="-L../lib -lopus" \
@@ -597,8 +609,8 @@ function Build-Vulkan {
             cmake -S Vulkan-Headers -B Vulkan-Headers/build -G Ninja `
                 -DCMAKE_BUILD_TYPE=Release `
                 -DCMAKE_INSTALL_PREFIX="$PWD/install" `
-                -DCMAKE_C_FLAGS_RELEASE="-flto=thin -O3 -DNDEBUG -march=native" `
-                -DCMAKE_CXX_FLAGS_RELEASE="-flto=thin -O3 -DNDEBUG -march=native"
+                -DCMAKE_C_FLAGS_RELEASE="$COMMON_FLAGS" `
+                -DCMAKE_CXX_FLAGS_RELEASE="$COMMON_FLAGS"
         }
         Invoke-Step "Installing Vulkan Headers" {
             ninja -C Vulkan-Headers/build install
@@ -626,7 +638,7 @@ function Build-Vulkan {
                 -DBUILD_SHARED_LIBS=ON `
                 "-DCMAKE_ASM_MASM_COMPILER=ml64.exe" `
                 -DVULKAN_HEADERS_INSTALL_DIR="$PWD/install" `
-                -DCMAKE_C_FLAGS_RELEASE="-flto=thin -O3 -DNDEBUG -march=native"
+                -DCMAKE_C_FLAGS_RELEASE="$COMMON_FLAGS"
             ninja -C Vulkan-Loader/build
             ninja -C Vulkan-Loader/build install
         }
@@ -744,7 +756,7 @@ sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../d
     --strip="llvm-strip" \
     --toolchain="msvc" \
     --enable-lto="thin" \
-    --extra-cflags="-flto=thin -DNDEBUG -march=native /clang:-O3" \
+    --extra-cflags="$COMMON_FLAGS" \
     --extra-libs="dav1d.lib vulkan-1.lib" \
     --disable-shared \
     --enable-static \
@@ -925,37 +937,49 @@ function Build-Xav {
 if (Test-Path 'lib') {
     $existingLibs = @(Get-ChildItem -Path 'lib\*.lib' -ErrorAction SilentlyContinue)
     if ($existingLibs.Count -gt 0) {
-        Write-Host "[PROMPT] Do you want to update and rebuild all dependencies?" -ForegroundColor Yellow
-        $rebuildChoice = Read-Host "Enter choice (Y/N) [Default: N]"
+        if ($NoPrompt) {
+            $rebuildChoice = if ($ForceRebuild) { 'Y' } else { 'N' }
+        } else {
+            Write-Host "[PROMPT] Do you want to update and rebuild all dependencies?" -ForegroundColor Yellow
+            $rebuildChoice = Read-Host "Enter choice (Y/N) [Default: N]"
+        }
         if ($rebuildChoice -ieq 'Y') {
             Remove-Item -Path 'lib\*.lib' -Force -ErrorAction SilentlyContinue
         }
-        Write-Host ""
+        if (-not $NoPrompt) { Write-Host "" }
     }
 }
 
-Write-Host "Compile with target quality feature?"
-$tqChoice = Read-Host "Enter choice (Y/N) [Default: Y]"
-if (-not $tqChoice) { $tqChoice = 'Y' }
+if ($NoPrompt) {
+    $tqChoice = if ($EnableTQ) { 'Y' } else { 'N' }
+} else {
+    Write-Host "Compile with target quality feature?"
+    $tqChoice = Read-Host "Enter choice (Y/N) [Default: Y]"
+    if (-not $tqChoice) { $tqChoice = 'Y' }
+}
 
 $enableTQ = $tqChoice -ieq 'Y'
 
 if ($enableTQ) {
-    Write-Host ""
-    Write-Host "Select Vship backend to compile:"
-    Write-Host "  1. CUDA"
-    Write-Host "  2. HIP"
-    Write-Host "  3. Vulkan"
-    $vshipChoice = Read-Host "Enter choice (1-3) [Default: 1]"
-    if (-not $vshipChoice) { $vshipChoice = '1' }
+    if ($NoPrompt) {
+        $vshipBackend = $Backend.ToLower()
+    } else {
+        Write-Host ""
+        Write-Host "Select Vship backend to compile:"
+        Write-Host "  1. CUDA"
+        Write-Host "  2. HIP"
+        Write-Host "  3. Vulkan"
+        $vshipChoice = Read-Host "Enter choice (1-3) [Default: 1]"
+        if (-not $vshipChoice) { $vshipChoice = '1' }
 
-    switch ($vshipChoice) {
-        '1' { $vshipBackend = 'cuda' }
-        '2' { $vshipBackend = 'hip' }
-        '3' { $vshipBackend = 'vulkan' }
-        default {
-            Write-Host "[ERROR] Invalid choice." -ForegroundColor Red
-            exit 1
+        switch ($vshipChoice) {
+            '1' { $vshipBackend = 'cuda' }
+            '2' { $vshipBackend = 'hip' }
+            '3' { $vshipBackend = 'vulkan' }
+            default {
+                Write-Host "[ERROR] Invalid choice." -ForegroundColor Red
+                exit 1
+            }
         }
     }
 }
@@ -963,8 +987,11 @@ else {
     $vshipBackend = 'none'
 }
 
-Write-Host ""
-Write-Host "Select SVT-AV1 variant to compile:"
+if ($NoPrompt) {
+    $svtChoice = $SvtVariantId.ToString()
+} else {
+    Write-Host ""
+    Write-Host "Select SVT-AV1 variant to compile:"
 Write-Host "  1. svt-av1-hdr       (https://github.com/juliobbv-p/svt-av1-hdr)"
 Write-Host "  2. svt-av1-essential (https://github.com/nekotrix/SVT-AV1-Essential)"
 Write-Host "  3. 5fish             (https://github.com/5fish/svt-av1-psy)"
@@ -972,7 +999,8 @@ Write-Host "  4. svt-av1-tritium   (https://github.com/Uranite/svt-av1-tritium)"
 Write-Host "  5. svt-av1-tritium yis branch [testing only, do not use]   (https://github.com/Uranite/svt-av1-tritium/tree/yis)"
 Write-Host "  6. svt-av1-essential yiss fork [testing only, do not use]  (https://github.com/Uranite/SVT-AV1-Essential)"
 $svtChoice = Read-Host "Enter choice (1-6) [Default: 1]"
-if (-not $svtChoice) { $svtChoice = '1' }
+    if (-not $svtChoice) { $svtChoice = '1' }
+}
 
 switch ($svtChoice) {
     '1' { $svtVariant = 'svt-av1-hdr'; $svtRepo = 'https://github.com/juliobbv-p/svt-av1-hdr.git'; $svtBranch = ''; $svtDir = 'svt-av1-hdr'; $svtExtraCFlags = '' }
@@ -987,8 +1015,11 @@ switch ($svtChoice) {
     }
 }
 
-Write-Host ""
-Write-Host "Select target architecture for SVT-AV1:"
+if ($NoPrompt) {
+    $archChoice = $ArchChoiceId.ToString()
+} else {
+    Write-Host ""
+    Write-Host "Select target architecture for SVT-AV1:"
 Write-Host "  1. znver2                   (-march=znver2)"
 Write-Host "  2. icelake-server + znver5  (-march=icelake-server -mtune=znver5 -mprefer-vector-width=512)"
 Write-Host "  3. native                   (-march=native)"
@@ -996,7 +1027,8 @@ Write-Host "  4. x86-64-v3                (-march=x86-64-v3)"
 Write-Host "  5. skylake                  (-march=skylake)"
 Write-Host "  6. haswell                  (-march=haswell)"
 $archChoice = Read-Host "Enter choice (1-6) [Default: 1]"
-if (-not $archChoice) { $archChoice = '1' }
+    if (-not $archChoice) { $archChoice = '1' }
+}
 
 switch ($archChoice) {
     '1' { $svtArchFlags = "-march=znver2" }
