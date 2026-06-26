@@ -17,6 +17,8 @@ use std::{
     time::{Duration as Durat, Instant},
 };
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use crate::{
     encoder::Encoder::{Avm, SvtAv1},
     error::Xerr::Help,
