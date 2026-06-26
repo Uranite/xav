@@ -19,6 +19,9 @@ use std::{
 
 use libc::{_exit, SIGINT, SIGSEGV, atexit, signal};
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use crate::{
     encoder::Encoder::{Avm, SvtAv1},
     error::Xerr::{Help, Msg},
