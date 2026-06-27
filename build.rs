@@ -103,14 +103,15 @@ fn build_asm() -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=lib");
     if cfg!(target_os = "windows") {
-        build_windows();
+        build_windows()?;
     } else {
-        build_unix();
+        build_unix()?;
     }
+    Ok(())
 }
 
 fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -217,6 +218,7 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
         //     println!("cargo:rustc-link-lib={}", lib);
         // }
     }
+    Ok(())
 }
 
 fn build_unix() -> Result<(), Box<dyn Error + Send + Sync>> {
