@@ -23,7 +23,6 @@ vcpkg = []
 [dependencies]
 libc = "0.2.186"
 thiserror = "2.0.18"
-mimalloc = "0.1.52"
 
 [build-dependencies]
 nasm-rs = { version = "0.3.2", features = ["parallel"] }
