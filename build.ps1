@@ -252,7 +252,7 @@ function Install-GpuSdk {
     param([string]$VshipBackend, [bool]$VsIncludeV143)
     if ($VshipBackend -eq 'cuda' -and -not $env:CUDA_PATH) {
         if (-not $VsIncludeV143) {
-            Confirm-Install "NVIDIA CUDA Toolkit 13.2" "Nvidia.CUDA"
+            Confirm-Install "NVIDIA CUDA Toolkit 13.3" "Nvidia.CUDA"
         }
         else {
             Write-Host ""
