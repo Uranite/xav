@@ -3,11 +3,6 @@
     target_feature = "avx2"
 ))]
 include!("avx2.rs");
-#[cfg(not(all(
-    any(target_os = "linux", target_os = "windows"),
-    target_feature = "avx2"
-)))]
-include!("scalar.rs");
 
 use std::{array::from_fn, cell::UnsafeCell, sync::atomic::AtomicU32};
 

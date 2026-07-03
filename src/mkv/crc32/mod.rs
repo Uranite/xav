@@ -1,10 +1,3 @@
-pub const CRC_ID: u8 = 0xBF;
-pub const CRC_ELEMENT_LEN: usize = 6;
-const CRC_SIZE_VINT: u8 = 0x84;
-
-const INIT: u32 = 0xFFFF_FFFF;
-const FINAL_XOR: u32 = 0xFFFF_FFFF;
-
 #[cfg(target_feature = "avx512bw")]
 include!("avx512.rs");
 #[cfg(all(not(target_feature = "avx512bw"), target_feature = "vpclmulqdq"))]
@@ -16,12 +9,13 @@ include!("avx2_vpclmul.rs");
     target_feature = "avx2"
 ))]
 include!("avx2_pclmul.rs");
-#[cfg(all(
-    not(target_feature = "avx512bw"),
-    not(target_feature = "vpclmulqdq"),
-    not(all(target_feature = "pclmulqdq", target_feature = "avx2"))
-))]
-include!("scalar.rs");
+
+pub const CRC_ID: u8 = 0xBF;
+pub const CRC_ELEMENT_LEN: usize = 6;
+const CRC_SIZE_VINT: u8 = 0x84;
+
+const INIT: u32 = 0xFFFF_FFFF;
+const FINAL_XOR: u32 = 0xFFFF_FFFF;
 
 #[inline]
 #[must_use]

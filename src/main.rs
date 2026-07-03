@@ -13,7 +13,7 @@ use std::{
     panic::set_hook,
     path::{Path, PathBuf},
     sync::atomic::Ordering::Relaxed,
-    thread::{JoinHandle, available_parallelism, spawn},
+    thread::available_parallelism,
     time::{Duration as Durat, Instant},
 };
 
@@ -21,7 +21,7 @@ use libc::{_exit, SIGINT, SIGSEGV, atexit, signal};
 
 use crate::{
     encoder::Encoder::{Avm, SvtAv1},
-    error::Xerr::{Help, Msg},
+    error::Xerr::Help,
 };
 
 #[cfg(feature = "vship")]
@@ -49,8 +49,8 @@ mod mux_webm;
 mod nal_config;
 mod nal_parse;
 mod nal_scan;
+mod norm;
 mod obu_parse;
-mod ogg;
 mod opus;
 mod pack;
 pub mod pipeline;
@@ -540,14 +540,10 @@ fn init_pipe_crop(
 
 fn acq_au(
     spec: &AuSpec,
-    cached: Option<Vec<(AuStream, PathBuf)>>,
     args: &Args,
     inf: &VidInf,
     work_dir: &Path,
 ) -> Result<Vec<(AuStream, PathBuf)>, Xerr> {
-    if let Some(f) = cached {
-        return Ok(f);
-    }
     print!("\x1b[H\x1b[2J");
     _ = stdout().flush();
     let samp_ranges = args.ranges.as_ref().map(|r| {
@@ -561,52 +557,6 @@ fn acq_au(
             .collect::<Vec<_>>()
     });
     enc_au_streams(spec, &args.inp, work_dir, samp_ranges.as_deref(), 1)
-}
-
-type AuResult = Vec<(AuStream, PathBuf)>;
-type AuHandle = JoinHandle<Result<AuResult, Xerr>>;
-
-fn spawn_au(args: &Args, work_dir: &Path, inf: &VidInf) -> Option<AuHandle> {
-    (!args.sc_file.exists() && args.au.is_some() && args.encoder != Avm).then(|| {
-        let spec = unsafe { args.au.as_ref().unwrap_unchecked() }.clone();
-        let inp = args.inp.clone();
-        let wd = work_dir.to_path_buf();
-        let ranges = args.ranges.clone();
-        let fps_num = inf.fps_num;
-        let fps_den = inf.fps_den;
-
-        spawn(move || {
-            let samp_ranges = ranges.as_ref().map(|r| {
-                r.iter()
-                    .map(|&(s, e)| {
-                        (
-                            frame_samp(s, fps_num, fps_den, 48000),
-                            frame_samp(e, fps_num, fps_den, 48000),
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            });
-            enc_au_streams(&spec, &inp, &wd, samp_ranges.as_deref(), 5)
-        })
-    })
-}
-
-fn scd_and_au(
-    args: &Args,
-    inf: &VidInf,
-    crop: (u32, u32),
-    au_handle: Option<AuHandle>,
-) -> Result<Option<AuResult>, Xerr> {
-    if let Some(handle) = au_handle {
-        fd_scenes(&args.inp, &args.sc_file, inf, crop, 3, args.hwdec)?;
-        let result = handle
-            .join()
-            .map_err(|_e| Msg("Audio encoding thread panicked".into()))?;
-        Ok(Some(result?))
-    } else {
-        ensure_sc_file(args, inf, crop, 3)?;
-        Ok(None)
-    }
 }
 
 fn val_all_scenes(scenes: &[Scene], enc: Encoder) -> Result<(), Xerr> {
@@ -642,8 +592,6 @@ fn main_with_args(args: &Args) -> Result<(), Xerr> {
 
     let inf = get_vidinf(&args.inp)?;
 
-    let au_handle = spawn_au(args, &work_dir, &inf);
-
     let thr = unsafe { available_parallelism().unwrap_unchecked().get() as i32 };
     let conf = CropConf {
         sample_cnt: 13,
@@ -654,7 +602,7 @@ fn main_with_args(args: &Args) -> Result<(), Xerr> {
         _ => (0, 0),
     };
 
-    let au_files = scd_and_au(args, &inf, crop, au_handle)?;
+    ensure_sc_file(args, &inf, crop, 3)?;
 
     print!("\x1b[H\x1b[2J");
     _ = stdout().flush();
@@ -705,7 +653,7 @@ fn main_with_args(args: &Args) -> Result<(), Xerr> {
     let au_tracks = if let Some(ref au_spec) = args.au
         && args.encoder != Avm
     {
-        acq_au(au_spec, au_files, &args, &inf, &work_dir)?
+        acq_au(au_spec, &args, &inf, &work_dir)?
     } else {
         Vec::new()
     };

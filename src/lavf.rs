@@ -11,16 +11,17 @@ use crate::{
         av_frame_alloc, av_frame_free, av_packet_alloc, av_packet_free, av_packet_unref,
         av_read_frame, av_seek_frame, avcodec_alloc_context3, avcodec_flush_buffers,
         avcodec_free_context, avcodec_open2, avcodec_parameters_to_context, avcodec_receive_frame,
-        avcodec_send_packet, avformat_close_input, avformat_open_input, merge_ranges,
-        probe_streams,
+        avcodec_send_packet, avformat_close_input, avformat_open_input, probe_streams,
     },
 };
 
 const AVMEDIA_TYPE_AUDIO: c_int = 1;
+const AVDISCARD_ALL: c_int = 48;
 const AV_SAMPLE_FMT_FLT: c_int = 3;
 const AV_TIME_BASE: i64 = 1_000_000;
 const AVERROR_EOF: c_int = -541_478_725;
 const AVERROR_EAGAIN: c_int = -11;
+const MAX_OUT: usize = 96000;
 
 unsafe extern "C" {
     fn swr_alloc_set_opts2(
@@ -51,9 +52,13 @@ pub struct AuDecoder {
     swr: *mut c_void,
     pkt: *mut AVPacket,
     frame: *mut VidFrame,
+    out_buf: Vec<f32>,
     stream_idx: c_int,
     channels: u8,
     tot_samples: i64,
+    tb_num: i64,
+    tb_den: i64,
+    start_time: i64,
 }
 
 unsafe impl Send for AuDecoder {}
@@ -84,9 +89,19 @@ impl AuDecoder {
                 return Err("lavf: audio stream not found".into());
             }
 
+            for i in 0..(*fmt_ctx).nb_streams {
+                if i as c_int != idx {
+                    (*(*(*fmt_ctx).streams.add(i as usize))).discard = AVDISCARD_ALL;
+                }
+            }
+
             let stream = *(*fmt_ctx).streams.add(idx as usize);
             let par = &*(*stream).codecpar;
             let channels = par.ch_layout.nb_channels as u8;
+            let tb = (*stream).time_base;
+            let tb_num = i64::from(tb.num);
+            let tb_den = i64::from(tb.den);
+            let start_time = (*stream).start_time.max(0);
 
             let tot_samples = if (*stream).duration > 0 && (*stream).time_base.den > 0 {
                 (*stream).duration * i64::from((*stream).time_base.num) * 48000
@@ -131,35 +146,50 @@ impl AuDecoder {
                 return Err("lavf: swr init failed".into());
             }
 
+            let out_buf = vec![0f32; MAX_OUT * usize::from(channels)];
+
             Ok(Self {
                 fmt_ctx,
                 codec_ctx,
                 swr,
                 pkt: av_packet_alloc(),
                 frame: av_frame_alloc(),
+                out_buf,
                 stream_idx: idx,
                 channels,
                 tot_samples,
+                tb_num,
+                tb_den,
+                start_time,
             })
         }
-    }
-
-    pub const fn channels(&self) -> u8 {
-        self.channels
     }
 
     pub const fn tot_samples(&self) -> i64 {
         self.tot_samples
     }
 
-    pub fn dec_all<F: FnMut(&mut [f32]) -> Result<(), Xerr>>(
-        &mut self,
-        mut cb: F,
-    ) -> Result<(), Xerr> {
-        const MAX_OUT: usize = 96000;
-        let ch = usize::from(self.channels);
-        let mut out_buf = vec![0f32; MAX_OUT * ch];
+    #[inline]
+    const fn pts_to_sample(&self, pts: i64) -> i64 {
+        (pts - self.start_time) * 48000 * self.tb_num / self.tb_den
+    }
 
+    pub fn decode_range<F: FnMut(&mut [f32]) -> Result<(), Xerr>>(
+        &mut self,
+        s_start: i64,
+        s_end: i64,
+        is_first: bool,
+        is_last: bool,
+        mut cb: F,
+    ) -> Result<i64, Xerr> {
+        const WARMUP: i64 = 4096;
+        let seek = (s_start - WARMUP) * self.tb_den / (48000 * self.tb_num);
+        unsafe {
+            av_seek_frame(self.fmt_ctx, self.stream_idx, seek, AVSEEK_FLAG_BACKWARD);
+            avcodec_flush_buffers(self.codec_ctx);
+        }
+        let mut started = false;
+        let mut base = i64::MIN;
         unsafe {
             loop {
                 if av_read_frame(self.fmt_ctx, self.pkt) < 0 {
@@ -169,186 +199,68 @@ impl AuDecoder {
                     av_packet_unref(self.pkt);
                     continue;
                 }
+                let key = (*self.pkt).flags & 1 != 0;
+                let pts = (*self.pkt).pts;
+                if key && pts != i64::MIN {
+                    let pos = self.pts_to_sample(pts);
+                    if !started {
+                        if is_first || pos >= s_start {
+                            started = true;
+                            base = pos;
+                        }
+                    } else if !is_last && pos >= s_end {
+                        av_packet_unref(self.pkt);
+                        break;
+                    }
+                }
                 loop {
                     if avcodec_send_packet(self.codec_ctx, self.pkt) != AVERROR_EAGAIN {
                         break;
                     }
-                    self.drain_frames(&mut out_buf, &mut cb)?;
+                    self.drain_unit(started, &mut cb)?;
                 }
                 av_packet_unref(self.pkt);
-                self.drain_frames(&mut out_buf, &mut cb)?;
+                self.drain_unit(started, &mut cb)?;
             }
-
             avcodec_send_packet(self.codec_ctx, null());
-            self.drain_frames(&mut out_buf, &mut cb)?;
-
-            loop {
-                let mut out_ptr = out_buf.as_mut_ptr().cast::<u8>();
-                let n = swr_convert(self.swr, &raw mut out_ptr, MAX_OUT as c_int, null(), 0);
-                if n <= 0 {
-                    break;
-                }
-                cb(&mut out_buf[..n as usize * ch])?;
-            }
+            self.drain_unit(started, &mut cb)?;
         }
-        Ok(())
+        Ok(base)
     }
 
-    pub fn dec_ranges<F: FnMut(&mut [f32]) -> Result<(), Xerr>>(
+    unsafe fn drain_unit<F: FnMut(&mut [f32]) -> Result<(), Xerr>>(
         &mut self,
-        ranges: &[(i64, i64)],
-        mut cb: F,
-    ) -> Result<(), Xerr> {
-        const MAX_OUT: usize = 96000;
-        let ch = usize::from(self.channels);
-        let mut out_buf = vec![0f32; MAX_OUT * ch];
-        let (tb_num, tb_den, start_time) = unsafe {
-            let stream = *(*self.fmt_ctx).streams.add(self.stream_idx as usize);
-            let tb = (*stream).time_base;
-            (
-                i64::from(tb.num),
-                i64::from(tb.den),
-                (*stream).start_time.max(0),
-            )
-        };
-        let merged = merge_ranges(ranges.iter().map(|&(a, b)| (a, b - 1)));
-
-        for (a, b) in merged {
-            let ts = a * AV_TIME_BASE / 48000;
-            unsafe {
-                av_seek_frame(self.fmt_ctx, -1, ts, AVSEEK_FLAG_BACKWARD);
-                avcodec_flush_buffers(self.codec_ctx);
-            }
-            let mut pos: i64 = -1;
-            let mut stop = false;
-
-            unsafe {
-                while !stop {
-                    if av_read_frame(self.fmt_ctx, self.pkt) < 0 {
-                        break;
-                    }
-                    if (*self.pkt).stream_index != self.stream_idx {
-                        av_packet_unref(self.pkt);
-                        continue;
-                    }
-                    if pos < 0 {
-                        pos = ((*self.pkt).pts - start_time) * 48000 * tb_num / tb_den;
-                    }
-                    loop {
-                        if avcodec_send_packet(self.codec_ctx, self.pkt) != AVERROR_EAGAIN {
-                            break;
-                        }
-                        self.drain_filter(&mut out_buf, &mut pos, &mut stop, a, b, &mut cb)?;
-                        if stop {
-                            break;
-                        }
-                    }
-                    av_packet_unref(self.pkt);
-                    self.drain_filter(&mut out_buf, &mut pos, &mut stop, a, b, &mut cb)?;
-                }
-
-                avcodec_send_packet(self.codec_ctx, null());
-                self.drain_filter(&mut out_buf, &mut pos, &mut stop, a, b, &mut cb)?;
-
-                while !stop {
-                    let mut out_ptr = out_buf.as_mut_ptr().cast::<u8>();
-                    let n = swr_convert(self.swr, &raw mut out_ptr, MAX_OUT as c_int, null(), 0);
-                    if n <= 0 {
-                        break;
-                    }
-                    emit_filtered(
-                        &mut out_buf[..n as usize * ch],
-                        ch,
-                        &mut pos,
-                        &mut stop,
-                        a,
-                        b,
-                        &mut cb,
-                    )?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    unsafe fn drain_frames<F: FnMut(&mut [f32]) -> Result<(), Xerr>>(
-        &mut self,
-        out_buf: &mut [f32],
+        emit: bool,
         cb: &mut F,
     ) -> Result<(), Xerr> {
         let ch = usize::from(self.channels);
-        let max_per_ch = (out_buf.len() / ch) as c_int;
+        let max_per_ch = (self.out_buf.len() / ch) as c_int;
         loop {
             let ret = unsafe { avcodec_receive_frame(self.codec_ctx, self.frame) };
             if ret == AVERROR_EAGAIN || ret == AVERROR_EOF {
                 return Ok(());
             }
             if ret < 0 {
-                return Err("lavf: decode error".into());
+                return Err(decode_err());
+            }
+            if !emit {
+                continue;
             }
             let nb = unsafe { (*self.frame).nb_samples };
-            let mut out_ptr = out_buf.as_mut_ptr().cast::<u8>();
+            let mut out_ptr = self.out_buf.as_mut_ptr().cast::<u8>();
             let in_ptr = unsafe { (*self.frame).extended_data.cast::<*const u8>() };
             let n = unsafe { swr_convert(self.swr, &raw mut out_ptr, max_per_ch, in_ptr, nb) };
             if n > 0 {
-                cb(&mut out_buf[..n as usize * ch])?;
-            }
-        }
-    }
-
-    unsafe fn drain_filter<F: FnMut(&mut [f32]) -> Result<(), Xerr>>(
-        &mut self,
-        out_buf: &mut [f32],
-        pos: &mut i64,
-        stop: &mut bool,
-        a: i64,
-        b: i64,
-        cb: &mut F,
-    ) -> Result<(), Xerr> {
-        let ch = usize::from(self.channels);
-        let max_per_ch = (out_buf.len() / ch) as c_int;
-        loop {
-            let ret = unsafe { avcodec_receive_frame(self.codec_ctx, self.frame) };
-            if ret == AVERROR_EAGAIN || ret == AVERROR_EOF {
-                return Ok(());
-            }
-            if ret < 0 {
-                return Err("lavf: decode error".into());
-            }
-            let nb = unsafe { (*self.frame).nb_samples };
-            let mut out_ptr = out_buf.as_mut_ptr().cast::<u8>();
-            let in_ptr = unsafe { (*self.frame).extended_data.cast::<*const u8>() };
-            let n = unsafe { swr_convert(self.swr, &raw mut out_ptr, max_per_ch, in_ptr, nb) };
-            if n > 0 {
-                emit_filtered(&mut out_buf[..n as usize * ch], ch, pos, stop, a, b, cb)?;
-                if *stop {
-                    return Ok(());
-                }
+                cb(&mut self.out_buf[..n as usize * ch])?;
             }
         }
     }
 }
 
-fn emit_filtered<F: FnMut(&mut [f32]) -> Result<(), Xerr>>(
-    chnk: &mut [f32],
-    ch: usize,
-    pos: &mut i64,
-    stop: &mut bool,
-    a: i64,
-    b: i64,
-    cb: &mut F,
-) -> Result<(), Xerr> {
-    let chnk_n = (chnk.len() / ch) as i64;
-    let s = (a - *pos).max(0) as usize;
-    let e = (b - *pos).saturating_add(1).min(chnk_n).max(0) as usize;
-    if s < e {
-        cb(&mut chnk[s * ch..e * ch])?;
-    }
-    *pos += chnk_n;
-    if *pos > b {
-        *stop = true;
-    }
-    Ok(())
+#[cold]
+#[inline(never)]
+fn decode_err() -> Xerr {
+    "lavf: decode error".into()
 }
 
 impl Drop for AuDecoder {

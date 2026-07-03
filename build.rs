@@ -82,6 +82,9 @@ fn build_asm() -> Result<(), Box<dyn Error + Send + Sync>> {
             for k in ["atou", "atof", "atof2", "scan"] {
                 b.file(format!("asm/{set}/atofu/{k}.asm"));
             }
+            for k in ["mix", "loud"] {
+                b.file(format!("asm/{set}/norm/{k}.asm"));
+            }
             for k in ["pchip", "fc_spline", "lerp", "bs"] {
                 b.file(format!("asm/avx2/interp/{k}.asm"));
             }
@@ -139,11 +142,6 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         &[format!("{home}/.local/src/opus/install/lib")],
         "libopus.a",
     );
-    fd_static_libs(
-        &[format!("{home}/.local/src/libopusenc/install/lib")],
-        "libopusenc.a",
-    );
-    println!("cargo:rustc-link-lib=static=opusenc");
     println!("cargo:rustc-link-lib=static=opus");
 
     fd_static_libs(

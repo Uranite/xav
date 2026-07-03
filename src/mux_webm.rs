@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     audio::AuStream, byte_range::ByteRange, error::Xerr, ffms::VidInf, obu_parse::parse,
-    ogg::demux, platform::Mmap,
+    opus::read, platform::Mmap,
 };
 
 const ID_SEGMENT: u32 = 0x1853_8067;
@@ -329,7 +329,7 @@ pub fn mux_webm(
     let mut audio_meta: Vec<(u64, Vec<u8>, u64)> = Vec::new();
     let mut audio_end_ns = 0u64;
     for m in &amaps {
-        let os = demux(m.slice())?;
+        let os = read(m.slice());
         if os.packets.is_empty() {
             continue;
         }

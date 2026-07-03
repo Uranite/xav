@@ -7,7 +7,10 @@
 
 set -Eeuo pipefail
 
-[[ "${OSTYPE}" == darwin* ]] && IS_MAC=true || IS_MAC=false
+[[ "${OSTYPE}" == darwin* ]] && {
+        IS_MAC=true
+        echo "Mac support is temporarily disabled" && exit 1
+} || IS_MAC=false
 "${IS_MAC}" && LLVM_PREFIX="$(brew --prefix llvm)" && export PATH="${LLVM_PREFIX}/bin:${PATH}"
 
 install_deps() {
@@ -157,43 +160,18 @@ detect_deps() {
 
         ALL_STATIC_DIRS=("${SYS_LIB_DIRS[@]}" "${GCC_LIB_DIRS[@]}" "${CLANG_LIB_DIRS[@]}")
 
-        RUST_NIGHTLY_PATH="$(find_bin rustc || true)"
-        RUSTC_VERSION=""
-        [[ -n "${RUST_NIGHTLY_PATH}" ]] && {
-                RUSTC_VERSION="$(rustc --version 2> /dev/null || true)"
-                [[ "${RUSTC_VERSION}" == *nightly* ]] && HAS_RUST_NIGHTLY=true || HAS_RUST_NIGHTLY=false
-        } || HAS_RUST_NIGHTLY=false
-
-        NASM_PATH="$(find_bin nasm || true)"
-        NASM_VERSION=""
-        [[ -n "${NASM_PATH}" ]] && {
-                HAS_NASM=true
-                NASM_VERSION="$(nasm --version 2> /dev/null | head -1 || true)"
-        } || HAS_NASM=false
-
-        LLD_PATH="$(find_bin ld.lld || true)"
-        [[ -n "${LLD_PATH}" ]] && HAS_LLD=true || HAS_LLD=false
-
-        CLANG_PATH="$(find_bin clang || true)"
-        [[ -n "${CLANG_PATH}" ]] && HAS_CLANG=true || HAS_CLANG=false
-
-        LLVM_PATH="$(find_bin llvm-ar || true)"
-        [[ -n "${LLVM_PATH}" ]] && HAS_LLVM=true || HAS_LLVM=false
+        RUSTC_VERSION="$(rustc --version 2> /dev/null || true)"
 
         COMPILERRT_PATH=""
         for rt_name in libclang_rt.builtins.a libclang_rt.builtins-x86_64.a libclang_rt.builtins-aarch64.a libclang_rt.osx.a; do
                 COMPILERRT_PATH="$(find_lib "${rt_name}" "${CLANG_LIB_DIRS[@]}" "${ALL_STATIC_DIRS[@]}" || true)"
                 [[ -n "${COMPILERRT_PATH}" ]] && break
         done
-        [[ -n "${COMPILERRT_PATH}" ]] && HAS_COMPILERRT=true || HAS_COMPILERRT=false
 
         HAS_HARD_REQS=true
-        for req in HAS_RUST_NIGHTLY HAS_NASM HAS_COMPILERRT HAS_LLD HAS_CLANG HAS_LLVM; do
-                [[ "${!req}" == false ]] && {
-                        HAS_HARD_REQS=false
-                        break
-                }
-        done
+        [[ "${RUSTC_VERSION}" == *nightly* && -n "${COMPILERRT_PATH}" &&
+                -n "$(find_bin nasm)" && -n "$(find_bin ld.lld)" &&
+                -n "$(find_bin clang)" && -n "$(find_bin llvm-ar)" ]] || HAS_HARD_REQS=false
 
         VSHIP_SEARCH_DIRS=(
                 "${HOME}/.local/src/Vship"
@@ -207,41 +185,8 @@ detect_deps() {
         VSHIP_STATIC_PATH="$(find_lib libvship.a "${VSHIP_SEARCH_DIRS[@]}" || true)"
         [[ -n "${VSHIP_STATIC_PATH}" ]] && HAS_VSHIP_STATIC=true || HAS_VSHIP_STATIC=false
 
-        LLVM_LIB_DIRS=()
-        while IFS= read -r d; do
-                LLVM_LIB_DIRS+=("${d}")
-        done < <(find /usr/lib/llvm /usr/lib64/llvm -maxdepth 3 -type d -name "lib64" -o -type d -name "lib" 2> /dev/null || true)
-
         VSHIP_PATH="$(find_lib libvship.so "${SYS_LIB_DIRS[@]}" || true)"
         [[ -n "${VSHIP_PATH}" ]] && HAS_VSHIP=true || HAS_VSHIP=false
-
-        AVMENC_PATH="$(find_bin avmenc || true)"
-        AVMENC_VERSION=""
-        [[ -n "${AVMENC_PATH}" ]] && {
-                HAS_AVMENC=true
-                AVMENC_VERSION="$(avmenc --help 2>&1 | head -1 || true)"
-        } || HAS_AVMENC=false
-
-        VVENCFFAPP_PATH="$(find_bin vvencFFapp || true)"
-        VVENCFFAPP_VERSION=""
-        [[ -n "${VVENCFFAPP_PATH}" ]] && {
-                HAS_VVENCFFAPP=true
-                VVENCFFAPP_VERSION="$(vvencFFapp --version 2>&1 | head -1 || true)"
-        } || HAS_VVENCFFAPP=false
-
-        X265_PATH="$(find_bin x265 || true)"
-        X265_VERSION=""
-        [[ -n "${X265_PATH}" ]] && {
-                HAS_X265=true
-                X265_VERSION="$(x265 --version 2>&1 | head -1 || true)"
-        } || HAS_X265=false
-
-        X264_PATH="$(find_bin x264 || true)"
-        X264_VERSION=""
-        [[ -n "${X264_PATH}" ]] && {
-                HAS_X264=true
-                X264_VERSION="$(x264 --version 2>&1 | head -1 || true)"
-        } || HAS_X264=false
 
         ELIGIBLE=()
         [[ "${HAS_HARD_REQS}" == true ]] && {
@@ -249,28 +194,6 @@ detect_deps() {
                 [[ "${HAS_VSHIP}" == true ]] && ELIGIBLE+=(true) || ELIGIBLE+=(false)
                 ELIGIBLE+=(true)
         } || ELIGIBLE=(false false false)
-}
-
-dep_status() {
-        local has="${1}" path="${2}" ver="${3:-}"
-        local NF="${R}  Not Found${N}"
-
-        [[ "${has}" == true ]] && {
-                [[ -n "${ver}" ]] && echo -e "${G}✅ ${path} ${W}(${ver})${N}" || echo -e "${G}✅ ${path}${N}"
-        } || echo -e "${NF}"
-}
-
-dep_status_locations() {
-        local has="${1}" path="${2}"
-        shift 2
-        local search_dirs=("${@}")
-
-        [[ "${has}" == true ]] && echo -e "${G}✅ ${path}${N}" || {
-                echo -e "${R}  Not Found in:${N}"
-                for dir in "${search_dirs[@]}"; do
-                        echo -e "      ${R}- ${dir}${N}"
-                done
-        }
 }
 
 show_build_menu() {
@@ -288,38 +211,6 @@ show_build_menu() {
         cargo clean > /dev/null 2>&1
         rm -f Cargo.lock
 
-        echo -e "${C}╔═══════════════════════════════════════════════════════════════════════╗${N}"
-        echo -e "${C}║${W}  Required Compiler Toolchain (needed for all build types)             ${C}║${N}"
-        echo -e "${C}╚═══════════════════════════════════════════════════════════════════════╝${N}"
-        printf "  ${Y}%-30b${N} %b\n" "Rust Nightly:" "$(dep_status "${HAS_RUST_NIGHTLY}" "${RUST_NIGHTLY_PATH}" "${RUSTC_VERSION}")"
-        printf "  ${Y}%-30b${N} %b\n" "NASM:" "$(dep_status "${HAS_NASM}" "${NASM_PATH}" "${NASM_VERSION}")"
-        printf "  ${Y}%-30b${N} %b\n" "compiler-rt:" "$(dep_status "${HAS_COMPILERRT}" "${COMPILERRT_PATH}")"
-        printf "  ${Y}%-30b${N} %b\n" "lld:" "$(dep_status "${HAS_LLD}" "${LLD_PATH}")"
-        printf "  ${Y}%-30b${N} %b\n" "clang:" "$(dep_status "${HAS_CLANG}" "${CLANG_PATH}")"
-        printf "  ${Y}%-30b${N} %b\n" "llvm:" "$(dep_status "${HAS_LLVM}" "${LLVM_PATH}")"
-        echo
-
-        echo -e "${C}╔═══════════════════════════════════════════════════════════════════════╗${N}"
-        echo -e "${C}║${W}  VSHIP (Optional — required for modes with TQ)                        ${C}║${N}"
-        echo -e "${C}╚═══════════════════════════════════════════════════════════════════════╝${N}"
-        printf "  ${Y}%-30b${N} %b\n" "VSHIP static:" "$(dep_status_locations "${HAS_VSHIP_STATIC}" "${VSHIP_STATIC_PATH}" "${VSHIP_SEARCH_DIRS[@]}")"
-        printf "  ${Y}%-30b${N} %b\n" "VSHIP dynamic:" "$(dep_status "${HAS_VSHIP}" "${VSHIP_PATH}")"
-        echo
-
-        echo -e "${C}╔═══════════════════════════════════════════════════════════════════════╗${N}"
-        echo -e "${C}║${W}  Runtime Requirements                                                 ${C}║${N}"
-        echo -e "${C}╚═══════════════════════════════════════════════════════════════════════╝${N}"
-        echo -e "  ${W}Encoder Binaries (Optional):${N}"
-        printf "  ${Y}%-30b${N} %b\n" "avmenc:" "$(dep_status "${HAS_AVMENC}" "${AVMENC_PATH}" "${AVMENC_VERSION}")"
-        printf "  ${Y}%-30b${N} %b\n" "vvencFFapp:" "$(dep_status "${HAS_VVENCFFAPP}" "${VVENCFFAPP_PATH}" "${VVENCFFAPP_VERSION}")"
-        printf "  ${Y}%-30b${N} %b\n" "x265:" "$(dep_status "${HAS_X265}" "${X265_PATH}" "${X265_VERSION}")"
-        printf "  ${Y}%-30b${N} %b\n" "x264:" "$(dep_status "${HAS_X264}" "${X264_PATH}" "${X264_VERSION}")"
-        echo
-
-        echo -e "\n${C}╔═══════════════════════════════════════════════════════════════════════╗${N}"
-        echo -e "${C}║${W}                         Build Configuration                           ${C}║${N}"
-        echo -e "${C}╚═══════════════════════════════════════════════════════════════════════╝${N}\n"
-
         echo -e "  ${W}[x]${N} ${Y}= Eligible to build${N}\n"
 
         for i in "${!BUILD_MODES[@]}"; do
@@ -329,11 +220,6 @@ show_build_menu() {
                         printf "  ${R}[ ] ${Y}%d) ${P}%b${N}\n" "${idx}" "${BUILD_MODES[i]}"
         done
         echo
-
-        for i in "${!BUILD_DESCS[@]}"; do
-                printf "  ${Y}%d) ${P}%b${N}\n" "$((i + 1))" "${BUILD_DESCS[i]}"
-        done
-        echo
 }
 
 cleanup_existing() {
@@ -341,7 +227,6 @@ cleanup_existing() {
                 [dav1d]="lib/pkgconfig/dav1d.pc"
                 [FFmpeg]="install/lib/libavcodec.a"
                 [opus]="install/lib/libopus.a"
-                [libopusenc]="install/lib/libopusenc.a"
                 ["SVT-AV1"]="Bin/Release/libSvtAv1Enc.a"
                 [vulkan]="install/lib/pkgconfig/vulkan.pc"
         )
@@ -349,7 +234,7 @@ cleanup_existing() {
         local successful=() incomplete=()
         local dir
 
-        for dir in dav1d FFmpeg opus libopusenc SVT-AV1 vulkan; do
+        for dir in dav1d FFmpeg opus SVT-AV1 vulkan; do
                 [[ -d "${BUILD_DIR}/${dir}" ]] || continue
                 [[ -f "${BUILD_DIR}/${dir}/${artifacts[${dir}]}" ]] && successful+=("${dir}") || incomplete+=("${dir}")
         done
@@ -401,7 +286,6 @@ clone_phase() {
         mkdir -p "${BUILD_DIR}/vulkan"
 
         clone_async "${BUILD_DIR}/opus" "https://gitlab.xiph.org/xiph/opus.git"
-        clone_async "${BUILD_DIR}/libopusenc" "https://gitlab.xiph.org/xiph/libopusenc.git"
         clone_async "${BUILD_DIR}/SVT-AV1" "${svt_fork_url}"
         clone_async "${BUILD_DIR}/dav1d" "https://code.videolan.org/videolan/dav1d.git"
         clone_async "${BUILD_DIR}/vulkan/Vulkan-Headers" "https://github.com/KhronosGroup/Vulkan-Headers.git" "--depth 1"
@@ -539,12 +423,9 @@ build_ffmpeg() {
                 --disable-shared \
                 --enable-static \
                 --pkg-config-flags="--static" \
-                --disable-programs \
-                --disable-doc \
                 --disable-network \
                 --disable-autodetect \
                 --disable-all \
-                --disable-everything \
                 --enable-avcodec \
                 --enable-avformat \
                 --enable-avutil \
@@ -686,38 +567,6 @@ build_opus() {
         }
 }
 
-build_opusenc() {
-        [[ -f "${BUILD_DIR}/libopusenc/install/lib/libopusenc.a" ]] && return
-
-        loginf b "Building libopusenc"
-
-        local logfile="/tmp/build_opusenc_$.log"
-        : > "${logfile}"
-
-        cd "${BUILD_DIR}/libopusenc"
-        ./autogen.sh >> "${logfile}" 2>&1
-        PKG_CONFIG_PATH="${BUILD_DIR}/opus/install/lib/pkgconfig" \
-                CC="${CC}" \
-                CFLAGS="${CFLAGS} -I${BUILD_DIR}/opus/install/include" \
-                LDFLAGS="-L${BUILD_DIR}/opus/install/lib" \
-                ./configure \
-                --enable-static \
-                --disable-shared \
-                --disable-doc \
-                --disable-examples \
-                --prefix="${BUILD_DIR}/libopusenc/install" >> "${logfile}" 2>&1
-        make -j"$(nproc)" >> "${logfile}" 2>&1
-        make install >> "${logfile}" 2>&1 && {
-                rm -f "${logfile}"
-                loginf g "libopusenc built successfully"
-        } || {
-                echo -e "\n${R}Build failed! Output:${N}\n"
-                cat "${logfile}"
-                rm -f "${logfile}"
-                exit 1
-        }
-}
-
 build_svtav1() {
         [[ -f "${BUILD_DIR}/SVT-AV1/Bin/Release/libSvtAv1Enc.a" ]] && return
 
@@ -804,11 +653,10 @@ setup_toolchain() {
         unset LDFLAGS
 }
 
-SVT_FORK_NAMES=("hdr" "essential" "5fish (requires some mainline updates, currently not usable)" "mainline")
+SVT_FORK_NAMES=("hdr" "essential" "mainline")
 SVT_FORK_URLS=(
         "https://github.com/juliobbv-p/svt-av1-hdr"
         "https://github.com/nekotrix/SVT-AV1-Essential"
-        "https://github.com/5fish/svt-av1-psy"
         "https://gitlab.com/AOMediaCodec/SVT-AV1"
 )
 
@@ -835,12 +683,6 @@ main() {
                 "Build statically with TQ"
                 "Build dynamically with TQ"
                 "Build statically without TQ"
-        )
-
-        BUILD_DESCS=(
-                "Clone and compile ${G}decoder${P} libraries, ${G}opus${P}, ${G}SVT-AV1${P} and ${G}xav${P}; all statically (you need to have the static library for ${G}vship${P} yourself)."
-                "Clone and compile ${G}decoder${P} libraries, ${G}opus${P}, ${G}SVT-AV1${P} and ${G}xav${P}; by using dynamic ${G}vship${P} library from your system."
-                "Clone and compile ${G}decoder${P} libraries, ${G}opus${P}, ${G}SVT-AV1${P} and ${G}xav${P}; all statically without TQ."
         )
 
         [[ "${preset}" ]] && detect_deps || {
@@ -926,15 +768,11 @@ main() {
         build_svtav1 &
         PID_SVTAV1="${!}"
 
-        wait "${PID_OPUS}" || exit 1
-        build_opusenc &
-        PID_OPUSENC="${!}"
-
         wait "${PID_DAV1D}" && wait "${PID_VULKAN}" || exit 1
         build_ffmpeg &
         PID_FFMPEG="${!}"
 
-        wait "${PID_OPUSENC}" && wait "${PID_FFMPEG}" && wait "${PID_SVTAV1}" || exit 1
+        wait "${PID_OPUS}" && wait "${PID_FFMPEG}" && wait "${PID_SVTAV1}" || exit 1
 
         cd "${XAV_DIR}"
 
@@ -947,9 +785,8 @@ main() {
 
         cargo build --release ${cargo_features} > "${logfile}" 2>&1 && {
                 rm -f "${logfile}"
-                loginf g "Build complete"
-                loginf g "Binary: ${XAV_DIR}/target/release/xav"
-                /usr/bin/ls -la "${XAV_DIR}/target/release/xav" --color=always
+                loginf g "Build complete: ${XAV_DIR}/target/release/xav"
+                ls -la "${XAV_DIR}/target/release/xav" --color=always
         } || {
                 echo -e "\n${R}Build failed! Output:${N}\n"
                 cat "${logfile}"

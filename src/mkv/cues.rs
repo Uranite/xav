@@ -14,7 +14,7 @@ struct Cue {
     duration_ticks: u64,
 }
 
-// relative_position = first-BlockGroup offset in the cluster: CRC 6 + Timestamp(2+uint)
+// rela_pos = first-BG offset in cluster: CRC 6 + Timestamp(2+uint)
 // + Position(2+pos_width) + PrevSize
 #[inline]
 const fn cue_of(p: &ClusterPlan, pos_width: usize, frame_dur: u64) -> Cue {
@@ -85,7 +85,7 @@ fn write_cue_point(out: &mut [u8], cue: &Cue) -> usize {
         + uint_size(cue.duration_ticks);
     let cue_content = 2 + uint_size(cue.time_ticks) + 2 + tp_content;
 
-    // caller sizes `out` from cue_point_size(cue) -> every store is in bounds
+    // caller sizes `out` <- cue_point_size(cue) -> every store in bounds
     let mut n = 2;
     unsafe {
         *out.get_unchecked_mut(0) = 0xBB; // CuePoint

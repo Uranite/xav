@@ -20,6 +20,8 @@ use crate::{
     progs::ProgsBar,
 };
 
+const AVDISCARD_ALL: c_int = 48;
+
 pub struct Packet {
     pub range: ByteRange,
     pub pts: i64,
@@ -82,6 +84,8 @@ pub fn demux(inp: &Path, want_audio: bool, want_subs: bool) -> Result<Vec<Stream
                     .map(|t| Cow::Owned(t.1.to_owned()))
                     .or_else(|| stream_lang((*st).metadata));
                 streams.push(s);
+            } else {
+                (*st).discard = AVDISCARD_ALL;
             }
         }
         if !streams.is_empty() {

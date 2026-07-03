@@ -35,8 +35,7 @@ use crate::{
     nal_config::nal_codec_private,
     nal_parse::{NalSink, ParamSets, parse_h264, parse_h265, parse_h266},
     obu_parse::parse,
-    ogg::demux,
-    opus::version as opus_version,
+    opus::{read, version as opus_version},
     platform::{Mmap, write_mux},
     progs::ProgsBar,
 };
@@ -521,7 +520,7 @@ fn build_audio_tracks(
     let mut ainfos = Vec::new();
     for entry in au {
         let map = Mmap::open(&entry.1)?;
-        let os = demux(map.slice())?;
+        let os = read(map.slice());
         if os.packets.is_empty() {
             continue;
         }

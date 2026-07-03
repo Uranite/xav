@@ -7,7 +7,7 @@ use std::{
         Arc, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering::Relaxed},
     },
-    thread::{JoinHandle, sleep, spawn},
+    thread::{JoinHandle, park_timeout, sleep, spawn},
     time::{Duration as Durat, Instant},
 };
 
@@ -22,7 +22,7 @@ use crate::{
 };
 
 const BAR_WIDTH: usize = 20;
-const INTERVAL_MS: u64 = 500;
+pub const INTERVAL_MS: u64 = 500;
 const READ_CAP: usize = 8192;
 
 use crate::util::{B, C, G, N, P, R, W, Y, assume_unreachable};
@@ -94,7 +94,6 @@ fn write_bar(w: &mut impl fmt::Write, filled: usize, hash: &str, dash: &str) {
 
 pub struct ProgsBar {
     start: Instant,
-    tot: usize,
     last_update: Instant,
 }
 
@@ -103,7 +102,6 @@ impl ProgsBar {
         let now = Instant::now();
         Self {
             start: now,
-            tot: 0,
             last_update: now,
         }
     }
@@ -114,7 +112,6 @@ impl ProgsBar {
         }
         self.last_update = Instant::now();
 
-        self.tot = tot;
         let elapsed = self.start.elapsed().as_secs() as usize;
         let fps = current / elapsed.max(1);
         let remaining = tot.saturating_sub(current);
@@ -144,11 +141,8 @@ impl ProgsBar {
         }
         self.last_update = Instant::now();
 
-        self.tot = tot;
         let elapsed = self.start.elapsed().as_secs() as usize;
         let spd = current as f32 / elapsed.max(1) as f32 / 48000.0;
-        let remaining = tot.saturating_sub(current);
-        let eta_secs = remaining * elapsed / current.max(1);
         let filled = (BAR_WIDTH * current / tot.max(1)).min(BAR_WIDTH);
         let perc = (current * 100 / tot.max(1)).min(100);
         let dur = tot / 48000;
@@ -160,13 +154,12 @@ impl ProgsBar {
         } else {
             _ = write!(l, "\r\x1b[2K");
         }
-        _ = write!(l, "{C}[{W}{track_id:02}{C}] ");
-        write_el(&mut l, elapsed / 3600, (elapsed % 3600) / 60);
-        _ = write!(l, "{W}AU P{pass}: {C}[");
+        _ = write!(l, "{C}[{W}{track_id:02}{C}] {W}AU P{pass}: {C}[");
         write_bar(&mut l, filled, G_HASH, R_DASH);
-        _ = write!(l, "{C}] {W}{perc}%{C}, {Y}{spd:.1}x");
-        write_eta(&mut l, eta_secs / 3600, (eta_secs % 3600) / 60);
-        _ = write!(l, "{C}, {G}{dh:02}{P}:{G}{dm:02}{P}:{G}{ds:02}{N}");
+        _ = write!(
+            l,
+            "{C}] {W}{perc}%{C}, {Y}{spd:.1}x{C}, {G}{dh:02}{P}:{G}{dm:02}{P}:{G}{ds:02}{N}"
+        );
         print!("{}", l.as_str());
         _ = io_stdout().flush();
     }
@@ -177,19 +170,32 @@ impl ProgsBar {
         }
         self.last_update = Instant::now();
 
-        let elapsed = self.start.elapsed().as_secs() as usize;
         let filled = (BAR_WIDTH * current / tot.max(1)).min(BAR_WIDTH);
         let perc = (current * 100 / tot.max(1)).min(100);
 
         let mut l = Line::new();
-        _ = write!(l, "\r\x1b[2K");
-        write_el(&mut l, elapsed / 3600, (elapsed % 3600) / 60);
-        _ = write!(l, "{W}Source AU Read: {C}[");
+        _ = write!(l, "\r\x1b[2K{W}Source AU/Subs Read: {C}[");
         write_bar(&mut l, filled, G_HASH, R_DASH);
         _ = write!(l, "{C}] {W}{perc}%{N}");
         print!("{}", l.as_str());
         _ = io_stdout().flush();
     }
+}
+
+pub fn monitor_au(
+    done: &AtomicUsize,
+    stop: &AtomicBool,
+    tot: usize,
+    line: usize,
+    pass: u8,
+    tid: u8,
+) {
+    let mut progs = ProgsBar::new();
+    while !stop.load(Relaxed) {
+        progs.up_au(done.load(Relaxed).min(tot), tot, line, pass, tid);
+        park_timeout(Durat::from_millis(INTERVAL_MS));
+    }
+    progs.up_au(tot, tot, line, pass, tid);
 }
 
 fn guard(m: &Mutex<Line>) -> MutexGuard<'_, Line> {
