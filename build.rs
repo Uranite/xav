@@ -139,7 +139,6 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
     build_asm()?;
 
     if !cfg!(feature = "static") {
-        println!("cargo:rustc-link-lib=opusenc");
         println!("cargo:rustc-link-lib=opus");
         #[cfg(feature = "vship")]
         println!("cargo:rustc-link-lib=libvship");
@@ -149,7 +148,6 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut lib_path = PathBuf::from(&manifest_dir);
         lib_path.push("lib");
         println!("cargo:rustc-link-search=native={}", lib_path.display());
-        println!("cargo:rustc-link-lib=static=opusenc");
         println!("cargo:rustc-link-lib=static=opus");
         println!("cargo:rustc-link-lib=static=SvtAv1Enc");
         println!("cargo:rustc-link-lib=vulkan-1");
