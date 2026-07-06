@@ -549,50 +549,6 @@ function Build-Opus {
     }
 }
 
-function Build-Libopusenc {
-    param([string]$MsysExe)
-    if (Test-Path 'lib\opusenc.lib') {
-        Write-Host "[INFO] libopusenc already compiled. Skipping..." -ForegroundColor Cyan
-    }
-    else {
-        if (Test-Path 'libopusenc') { Push-Location libopusenc; git pull; Pop-Location }
-        else { git clone --depth 1 https://gitlab.xiph.org/xiph/libopusenc.git }
-        Push-Location libopusenc
-        Invoke-Step "Building libopusenc (MSYS2)" {
-            $llvmBinWin = Split-Path (Get-Command clang.exe).Definition
-            $bashScript = @"
-#!/bin/sh
-set -e
-export PATH="`$(cygpath -u '$llvmBinWin'):`$PATH"
-"@ + "`n" + @'
-./autogen.sh
-./configure CC="clang" CXX="clang++" \
-    CFLAGS="$COMMON_FLAGS -fuse-ld=lld" \
-    LDFLAGS="$COMMON_FLAGS -fuse-ld=lld" \
-    AR="llvm-ar" RANLIB="llvm-ranlib" \
-    DEPS_CFLAGS="-I../opus/include" \
-    DEPS_LIBS="-L../lib -lopus" \
-    --enable-static --disable-shared
-make clean
-make -j$(nproc)
-'@
-            Set-Content -Path 'build_msys2.sh' -Value $bashScript -Encoding Ascii
-            $env:MSYS2_PATH_TYPE = 'inherit'
-            $unixPath = $PWD.Path -replace '\\', '/'
-            & $MsysExe -lc "cd `"$unixPath`" && sh ./build_msys2.sh"
-        }
-        Pop-Location
-        
-        if (Test-Path 'libopusenc\.libs\opusenc.lib') {
-            Copy-Item 'libopusenc\.libs\opusenc.lib' 'lib\opusenc.lib' -Force
-        }
-        else {
-            Write-Host "[ERROR] Could not find compiled opusenc.lib output." -ForegroundColor Red
-            exit 1
-        }
-    }
-}
-
 function Build-Vulkan {
     param([string]$VsPath)
     if ((Test-Path 'lib\vulkan-1.lib') -and (Test-Path 'vulkan\install\include\spirv\unified1\spirv.h')) {
@@ -1107,7 +1063,6 @@ if ($enableTQ) {
 }
 Build-Dav1d
 Build-Opus
-Build-Libopusenc -MsysExe $msysExe
 Build-Vulkan -VsPath $vsPath
 Build-FFmpeg -VsPath $vsPath -MsysExe $msysExe
 Build-SvtAv1 -Variant $svtVariant -Dir $svtDir -Branch $svtBranch -Repo $svtRepo -ExtraCFlags $svtExtraCFlags -ArchFlags $svtArchFlags
