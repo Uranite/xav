@@ -59,7 +59,7 @@ use crate::{
 use crate::{
     atofu::{TqChunkLine, parse_chunks},
     pipeline::MetricProgs,
-    tq::{Probe, ProbeDec, ProbeLog, interpolate_crf, make_dav1d, make_ff},
+    tq::{Probe, ProbeDec, ProbeLog, interpolate_crf, interpolate_crf_by_sz, make_dav1d, make_ff},
     vship::{PinnedBuf, VshipProcessor, init_device},
     worker::TQState,
 };
@@ -227,6 +227,7 @@ struct TQWorkerCtx<'a> {
     output: fn(&Path, &TQState, &Path),
     threads: i32,
     ext: &'static str,
+    encoder: Encoder,
 }
 
 fn resolve_svt_enc(strat: DecStrat, is_nv12: bool, inf: &VidInf, pipe: &Pipeline) -> SvtEncFn {
@@ -381,6 +382,7 @@ struct TQCtx {
     use_butter: bool,
     use_cvvdp: bool,
     cvvdp_conf: Option<&'static str>,
+    limit_kbps: Option<f32>,
 }
 
 #[cfg(feature = "vship")]
@@ -411,16 +413,39 @@ impl TQCtx {
     }
 
     #[inline(always)]
-    fn best_probe<'a>(&self, probes: &'a [Probe]) -> &'a Probe {
-        unsafe {
-            probes
-                .iter()
-                .min_by(|a, b| {
-                    (a.score - self.target)
-                        .abs()
-                        .total_cmp(&(b.score - self.target).abs())
-                })
-                .unwrap_unchecked()
+    fn best_probe<'a>(&self, state: &'a TQState) -> &'a Probe {
+        if state.limit_mode {
+            let limit_sz = state.limit_sz.unwrap_or(0);
+            let valid = state.probes.iter().filter(|p| {
+                state.probe_szs.iter().any(|&(c, s)| (c - p.crf).abs() < 0.001 && s <= limit_sz)
+            });
+            
+            let max_valid = valid.max_by(|a, b| {
+                let sz_a = state.probe_szs.iter().find(|&&(c, _)| (c - a.crf).abs() < 0.001).unwrap().1;
+                let sz_b = state.probe_szs.iter().find(|&&(c, _)| (c - b.crf).abs() < 0.001).unwrap().1;
+                sz_a.cmp(&sz_b)
+            });
+            if let Some(p) = max_valid {
+                return p;
+            }
+            unsafe {
+                state.probes.iter().min_by(|a, b| {
+                    let sz_a = state.probe_szs.iter().find(|&&(c, _)| (c - a.crf).abs() < 0.001).unwrap().1;
+                    let sz_b = state.probe_szs.iter().find(|&&(c, _)| (c - b.crf).abs() < 0.001).unwrap().1;
+                    sz_a.cmp(&sz_b)
+                }).unwrap_unchecked()
+            }
+        } else {
+            unsafe {
+                state.probes
+                    .iter()
+                    .min_by(|a, b| {
+                        (a.score - self.target)
+                            .abs()
+                            .total_cmp(&(b.score - self.target).abs())
+                    })
+                    .unwrap_unchecked()
+            }
         }
     }
 
@@ -512,9 +537,37 @@ fn retain_swap(pkg: &mut WorkPkg, score: f32) {
         ..
     } = *pkg;
     let tq = unsafe { tq_state.as_mut().unwrap_unchecked() };
-    let diff = (score - tq.target).abs();
-    if diff < tq.best_diff {
-        tq.best_diff = diff;
+    let is_better = if tq.limit_mode {
+        let limit_sz = tq.limit_sz.unwrap_or(0);
+        let crf = tq.last_crf;
+        let probe_sz = tq.probe_szs.iter().find(|&&(c, _)| (c - crf).abs() < 0.001).map_or(0, |&(_, s)| s);
+        
+        let mut better = false;
+        if probe_sz <= limit_sz {
+            let diff = (limit_sz - probe_sz) as f32;
+            if tq.best_diff < 0.0 || diff < tq.best_diff {
+                tq.best_diff = diff;
+                better = true;
+            }
+        } else {
+            let diff = -((probe_sz - limit_sz) as f32);
+            if tq.best_diff == f32::INFINITY || (tq.best_diff < 0.0 && diff > tq.best_diff) {
+                tq.best_diff = diff;
+                better = true;
+            }
+        }
+        better
+    } else {
+        let diff = (score - tq.target).abs();
+        if diff < tq.best_diff {
+            tq.best_diff = diff;
+            true
+        } else {
+            false
+        }
+    };
+    
+    if is_better {
         swap(probe, &mut tq.best_probe);
     }
 }
@@ -561,7 +614,7 @@ fn run_metric_worker(rx: &SeqRing, work_tx: &SeqRing, ctx: &TQWorkerCtx, worker_
         let mut pkg = unsafe { Box::from_raw(m as *mut WorkPkg) };
         let tq_st = unsafe { pkg.tq_state.as_ref().unwrap_unchecked() };
         if tq_st.final_enc {
-            let best = ctx.tq_ctx.best_probe(&tq_st.probes);
+            let best = ctx.tq_ctx.best_probe(tq_st);
             let p = ctx
                 .work_dir
                 .join("encode")
@@ -615,12 +668,40 @@ fn run_metric_worker(rx: &SeqRing, work_tx: &SeqRing, ctx: &TQWorkerCtx, worker_
 
         let tq_state = unsafe { pkg.tq_state.as_mut().unwrap_unchecked() };
 
-        let should_complete = ctx.tq_ctx.converged(score)
-            || tq_state
-                .probes
-                .iter()
-                .any(|p| (p.crf - crf) * (p.score - score) >= 0.0)
-            || ctx.tq_ctx.up_bounds(tq_state, score);
+        if let Some(limit_sz) = tq_state.limit_sz {
+            if !tq_state.limit_mode {
+                let strictly_better = if ctx.tq_ctx.use_butter {
+                    score < ctx.tq_ctx.target - ctx.tq_ctx.tolerance
+                } else {
+                    score > ctx.tq_ctx.target + ctx.tq_ctx.tolerance
+                };
+                if !strictly_better && probe_sz > limit_sz {
+                    tq_state.limit_mode = true;
+                    tq_state.best_diff = -((probe_sz - limit_sz) as f32);
+                }
+            }
+        }
+
+        let should_complete = if tq_state.limit_mode {
+            let limit_sz = tq_state.limit_sz.unwrap_or(0);
+            let step = if ctx.encoder.integer_qp() { 1.0 } else { 0.25 };
+            if probe_sz > limit_sz {
+                tq_state.search_min = crf + step;
+                if tq_state.search_min >= tq_state.search_max && tq_state.search_max < ctx.encoder.max_qp() {
+                    tq_state.search_max = ctx.encoder.max_qp();
+                }
+            } else {
+                tq_state.search_max = crf - step;
+            }
+            tq_state.search_min > tq_state.search_max || (probe_sz <= limit_sz && (limit_sz - probe_sz) < (limit_sz / 50))
+        } else {
+            ctx.tq_ctx.converged(score)
+                || tq_state
+                    .probes
+                    .iter()
+                    .any(|p| (p.crf - crf) * (p.score - score) >= 0.0)
+                || ctx.tq_ctx.up_bounds(tq_state, score)
+        };
 
         tq_state.probes.push(Probe {
             crf,
@@ -629,12 +710,13 @@ fn run_metric_worker(rx: &SeqRing, work_tx: &SeqRing, ctx: &TQWorkerCtx, worker_
         });
 
         if should_complete {
-            let best = ctx.tq_ctx.best_probe(&tq_state.probes);
             if ctx.use_alt_param {
+                let best_crf = ctx.tq_ctx.best_probe(tq_state).crf;
                 tq_state.final_enc = true;
-                tq_state.last_crf = best.crf;
+                tq_state.last_crf = best_crf;
                 unsafe { mpsc_send(work_tx, Box::into_raw(pkg) as u64) };
             } else {
+                let best = ctx.tq_ctx.best_probe(tq_state);
                 let bp = probe_path(ctx.work_dir, pkg.chnk.idx, best.crf, ctx.ext);
                 complete_chnk(pkg.chnk.idx, pkg.frame_cnt, &bp, ctx, tq_state, best);
             }
@@ -663,6 +745,7 @@ fn parse_tq_ctx(args: &Args) -> TQCtx {
         use_butter: tq_target < 8.0,
         use_cvvdp: tq_target > 8.0 && tq_target <= 10.0,
         cvvdp_conf,
+        limit_kbps: args.limit,
     }
 }
 
@@ -686,11 +769,18 @@ fn tq_coord(coord: &SeqRing, enc: &SeqRing, tot_chnks: usize, permits: &Semaphor
 fn tq_search_crf(tq: &mut TQState, encoder: Encoder) -> f32 {
     tq.round += 1;
     let c = if tq.round <= 2 {
-        bisect(tq.search_min, tq.search_max)
+        bisect(tq.search_min, tq.search_max).clamp(tq.search_min, tq.search_max)
     } else {
-        interpolate_crf(&tq.probes, tq.target, tq.round)
-    }
-    .clamp(tq.search_min, tq.search_max);
+        if tq.limit_mode {
+            let pred = interpolate_crf_by_sz(&tq.probe_szs, tq.limit_sz.unwrap_or(0), tq.round);
+            if pred > tq.search_max && tq.search_max < encoder.max_qp() {
+                tq.search_max = encoder.max_qp();
+            }
+            pred.clamp(tq.search_min, tq.search_max)
+        } else {
+            interpolate_crf(&tq.probes, tq.target, tq.round).clamp(tq.search_min, tq.search_max)
+        }
+    };
     let c = if encoder.integer_qp() { c.round() } else { c };
     tq.last_crf = c;
     c
@@ -725,17 +815,25 @@ fn tq_enc_loop(
             break;
         }
         let mut pkg = unsafe { Box::from_raw(m as *mut WorkPkg) };
-        let tq = pkg.tq_state.get_or_insert_with(|| TQState {
-            probes: Vec::new(),
-            probe_szs: Vec::new(),
-            search_min: tq_ctx.qp_min,
-            search_max: tq_ctx.qp_max,
-            round: 0,
-            target: tq_ctx.target,
-            last_crf: 0.0,
-            final_enc: false,
-            best_probe: Vec::new(),
-            best_diff: f32::INFINITY,
+        let tq = pkg.tq_state.get_or_insert_with(|| {
+            let limit_sz = tq_ctx.limit_kbps.map(|kbps| {
+                (kbps * 125.0 * pkg.frame_cnt as f32 * ctx.inf.fps_den as f32
+                    / ctx.inf.fps_num as f32) as u64
+            });
+            TQState {
+                probes: Vec::new(),
+                probe_szs: Vec::new(),
+                search_min: tq_ctx.qp_min,
+                search_max: tq_ctx.qp_max,
+                round: 0,
+                target: tq_ctx.target,
+                last_crf: 0.0,
+                final_enc: false,
+                best_probe: Vec::new(),
+                best_diff: f32::INFINITY,
+                limit_mode: false,
+                limit_sz,
+            }
         });
         let is_final = tq.final_enc;
         let crf = if is_final {
@@ -935,7 +1033,7 @@ fn spawn_tq_metric(
             Arc::clone(sc.tq_logger),
             Arc::clone(sc.prog),
         );
-        let (tq_ctx, use_alt_param, worker_cnt) = (sc.tq_ctx, sc.use_alt_param, sc.worker_cnt);
+        let (tq_ctx, use_alt_param, worker_cnt, encoder) = (sc.tq_ctx, sc.use_alt_param, sc.worker_cnt, sc.encoder);
         metric_workers.push(spawn(move || {
             let ctx = TQWorkerCtx {
                 inf: &inf,
@@ -955,6 +1053,7 @@ fn spawn_tq_metric(
                 output,
                 threads,
                 ext,
+                encoder,
             };
             run_metric_worker(&rx, &coord, &ctx, worker_id);
         }));

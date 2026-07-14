@@ -117,6 +117,8 @@ pub struct Args {
     pub alt_param: Option<String>,
     pub sc_only: bool,
     pub hwdec: bool,
+    #[cfg(feature = "vship")]
+    pub limit: Option<f32>,
 }
 
 extern "C" fn restore() {
@@ -149,6 +151,9 @@ fn print_help() {
         println!("{C}-v {P}┃ {C}--vship      {W}Metric worker count");
         println!("{C}-d {P}┃ {C}--display    {W}CVVDP display file. Set screen name as {R}xav{W}");
         println!("{C}-P {P}┃ {C}--alt-param  {W}Alt params for TQ probes ({R}NOT RECOMMENDED{W}; expert-only)");
+        println!();
+        println!("{Y}Fork specific features, don't ask Emre for support:{W}");
+        println!("{C}-l {P}┃ {C}--limit      {W}Max bitrate limit (kbps) when using TQ");
     }
 }
 
@@ -291,6 +296,8 @@ fn parse_args_loop(args: &[String]) -> Result<Args, Xerr> {
     );
     #[cfg(feature = "vship")]
     let (mut metric_mode, mut metric_worker) = ("mean".to_owned(), 1usize);
+    #[cfg(feature = "vship")]
+    let mut limit = None::<f32>;
 
     let mut i = 1;
     while i < args.len() {
@@ -327,6 +334,8 @@ fn parse_args_loop(args: &[String]) -> Result<Args, Xerr> {
             "-d" | "--display" => arg!(opt args, i, cvvdp_conf),
             #[cfg(feature = "vship")]
             "-P" | "--alt-param" => arg!(opt args, i, alt_param),
+            #[cfg(feature = "vship")]
+            "-l" | "--limit" => arg!(opt_parse args, i, limit),
             "--hwdec" => hwdec = true,
             "--sc-only" => sc_only = true,
             "-h" | "--help" => {
@@ -374,6 +383,8 @@ fn parse_args_loop(args: &[String]) -> Result<Args, Xerr> {
         cvvdp_conf,
         #[cfg(feature = "vship")]
         alt_param,
+        #[cfg(feature = "vship")]
+        limit,
     })
 }
 

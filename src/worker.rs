@@ -26,6 +26,8 @@ pub struct TQState {
     pub final_enc: bool,
     pub best_probe: Vec<u8>,
     pub best_diff: f32,
+    pub limit_mode: bool,
+    pub limit_sz: Option<u64>,
 }
 
 impl WorkPkg {

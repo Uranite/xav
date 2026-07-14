@@ -129,6 +129,26 @@ pub fn interpolate_crf(probes: &[Probe], target: f32, round: u8) -> f32 {
     round_crf(result)
 }
 
+pub fn interpolate_crf_by_sz(probe_szs: &[(f32, u64)], target_sz: u64, round: u8) -> f32 {
+    let mut pairs: Vec<(f32, f32)> = probe_szs
+        .iter()
+        .map(|&(crf, sz)| (sz as f32, crf))
+        .collect();
+    pairs.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+
+    let x: Vec<f32> = pairs.iter().map(|p| p.0).collect();
+    let y: Vec<f32> = pairs.iter().map(|p| p.1).collect();
+
+    let target = target_sz as f32;
+    let result = match round {
+        3 => lerp(&x, &y, target),
+        4 => fc_spline(&x, &y, target),
+        _ => pchip(&x, &y, target),
+    };
+
+    round_crf(result)
+}
+
 macro_rules! calc_metric_impl {
     ($name:ident, $is_10b:expr) => {
         pub fn $name(

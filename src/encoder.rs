@@ -83,6 +83,15 @@ impl Encoder {
     pub const fn integer_qp(self) -> bool {
         matches!(self, Avm | Vvenc)
     }
+
+    pub const fn max_qp(self) -> f32 {
+        match self {
+            Self::Avm => 255.0,
+            Self::SvtAv1 => 70.0,
+            Self::Vvenc => 63.0,
+            Self::X265 | Self::X264 => 51.0,
+        }
+    }
 }
 
 fn run_version(prog: &str, name: &str, marker: Option<&str>) -> String {
