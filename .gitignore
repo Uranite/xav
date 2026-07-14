@@ -7,7 +7,6 @@ Cargo.lock
 # Dependencies
 /dav1d
 /FFmpeg
-/libopusenc
 /opus
 /svt-av1-hdr
 /svt-av1-essential
@@ -16,7 +15,7 @@ Cargo.lock
 /svt-av1-tritium-yis
 /svt-av1-essential-yis
 /Vship
-/vulkan
+/install
 
 # Build
 /target
