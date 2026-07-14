@@ -12,7 +12,7 @@ param (
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$COMMON_FLAGS = "-flto=thin -O3 -DNDEBUG -march=native"
+$COMMON_FLAGS = "-flto -O3 -DNDEBUG -march=native"
 
 function Install-Cuda129 {
     $url = 'https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_576.57_windows.exe'
@@ -551,7 +551,7 @@ function Build-Opus {
 
 function Build-Vulkan {
     param([string]$VsPath)
-    if ((Test-Path 'lib\vulkan-1.lib') -and (Test-Path 'vulkan\install\include\spirv\unified1\spirv.h')) {
+    if ((Test-Path 'lib\vulkan-1.lib') -and (Test-Path 'install\include\spirv\unified1\spirv.h')) {
         Write-Host "[INFO] Vulkan and SPIRV-Headers already compiled/installed. Skipping..." -ForegroundColor Cyan
     }
     else {
@@ -564,7 +564,7 @@ function Build-Vulkan {
         Invoke-Step "Configuring Vulkan Headers" {
             cmake -S Vulkan-Headers -B Vulkan-Headers/build -G Ninja `
                 -DCMAKE_BUILD_TYPE=Release `
-                -DCMAKE_INSTALL_PREFIX="$PWD/install" `
+                -DCMAKE_INSTALL_PREFIX="$PWD/../install" `
                 -DCMAKE_C_FLAGS_RELEASE="$COMMON_FLAGS" `
                 -DCMAKE_CXX_FLAGS_RELEASE="$COMMON_FLAGS"
         }
@@ -578,7 +578,7 @@ function Build-Vulkan {
         Invoke-Step "Configuring SPIRV-Headers" {
             cmake -S SPIRV-Headers -B SPIRV-Headers/build -G Ninja `
                 -DCMAKE_BUILD_TYPE=Release `
-                -DCMAKE_INSTALL_PREFIX="$PWD/install"
+                -DCMAKE_INSTALL_PREFIX="$PWD/../install"
         }
         Invoke-Step "Installing SPIRV-Headers" {
             ninja -C SPIRV-Headers/build install
@@ -590,10 +590,10 @@ function Build-Vulkan {
         Invoke-Step "Building Vulkan Loader" {
             cmake -S Vulkan-Loader -B Vulkan-Loader/build -G Ninja `
                 -DCMAKE_BUILD_TYPE=Release `
-                -DCMAKE_INSTALL_PREFIX="$PWD/install" `
+                -DCMAKE_INSTALL_PREFIX="$PWD/../install" `
                 -DBUILD_SHARED_LIBS=ON `
-                "-DCMAKE_ASM_MASM_COMPILER=ml64.exe" `
-                -DVULKAN_HEADERS_INSTALL_DIR="$PWD/install" `
+                -DCMAKE_ASM_MASM_COMPILER="ml64.exe" `
+                -DVULKAN_HEADERS_INSTALL_DIR="$PWD/../install" `
                 -DCMAKE_C_FLAGS_RELEASE="$COMMON_FLAGS"
             ninja -C Vulkan-Loader/build
             ninja -C Vulkan-Loader/build install
@@ -601,7 +601,7 @@ function Build-Vulkan {
 
         Pop-Location
 
-        Copy-Item 'vulkan\install\lib\vulkan-1.lib' 'lib\vulkan-1.lib' -Force
+        Copy-Item 'install\lib\vulkan-1.lib' 'lib\vulkan-1.lib' -Force
     }
 }
 
@@ -658,8 +658,9 @@ function Build-Dav1d {
             Write-Host "[INFO] Meson $mesonVersion installed successfully." -ForegroundColor Green
         }
         Invoke-Step "Building dav1d" {
-            meson setup build --default-library=static --buildtype=release -Db_vscrt=mt -Db_lto=true -Db_lto_mode=thin -Doptimization=3 -Denable_tools=false -Denable_examples=false -Dbitdepths="8,16" -Denable_asm=true "-Dc_args=-O3 -DNDEBUG -march=native -fuse-ld=lld" "-Dc_link_args=-O3 -DNDEBUG -march=native -fuse-ld=lld"
+            meson setup --reconfigure build --prefix="$PWD/../install" --default-library=static --buildtype=release -Db_vscrt=mt -Db_lto=true -Doptimization=3 -Denable_tools=false -Denable_examples=false -Dc_args="-DNDEBUG -march=native" -Dc_link_args="-fuse-ld=lld"
             ninja -C build
+            meson install -C build
         }
         Pop-Location
         Copy-Item dav1d\build\src\libdav1d.a lib\dav1d.lib -Force
@@ -669,8 +670,8 @@ function Build-Dav1d {
 function Build-FFmpeg {
     param([string]$VsPath, [string]$MsysExe)
     
-    $env:INCLUDE = "$PWD\dav1d\include;$PWD\dav1d\build\include;$PWD\vulkan\install\include;$env:INCLUDE"
-    $env:LIB = "$PWD\lib;$PWD\vulkan\install\lib;$env:LIB"
+    $env:INCLUDE = "$PWD\dav1d\include;$PWD\dav1d\build\include;$PWD\install\include;$env:INCLUDE"
+    $env:LIB = "$PWD\lib;$PWD\install\lib;$env:LIB"
 
     if (Test-Path 'lib\avcodec.lib') {
         Write-Host "[INFO] FFmpeg already compiled. Skipping..." -ForegroundColor Cyan
@@ -686,17 +687,13 @@ function Build-FFmpeg {
         Push-Location FFmpeg
         git apply "..\patch\ffmpeg.patch"
         Invoke-Step "Building FFmpeg" {
-            $llvmBinWin = Split-Path (Get-Command clang.exe).Definition
+            $llvmBinWin = "C:\Program Files\LLVM\bin"
             $bashScript = @"
 #!/bin/sh
 set -e
 export PATH="`$(cygpath -u '$llvmBinWin'):`$PATH"
 "@ + "`n" + @'
-export PKG_CONFIG_PATH="$(pwd)/../dav1d/build/meson-private:$(pwd)/../vulkan/install/lib/pkgconfig"
-sed -i "s|^prefix=.*|prefix=$(pwd)/../dav1d/build|" $(pwd)/../dav1d/build/meson-private/dav1d.pc
-sed -i "s|^libdir=.*|libdir=\${prefix}/src|" $(pwd)/../dav1d/build/meson-private/dav1d.pc
-sed -i "s|^includedir=.*|includedir=\${prefix}/../include|" $(pwd)/../dav1d/build/meson-private/dav1d.pc
-sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../dav1d/build/meson-private/dav1d.pc
+export PKG_CONFIG_PATH="$(pwd)/../install/lib/pkgconfig"
 
 # i forgot what this does
 # sed -i 's/-L\*) \[ "$_flags_type" = "link" \] && echo -libpath:${flag#-L} ;;/-L*) [ "$_flags_type" = "link" ] \&\& echo -libpath:${flag#-L} ;; -I*) [ "$_flags_type" = "link" ] || echo $flag ;;/g' configure
@@ -711,8 +708,9 @@ sed -i "s|^Cflags:.*|Cflags: -I\${includedir} -I\${prefix}/include|" $(pwd)/../d
     --ranlib="llvm-ranlib" \
     --strip="llvm-strip" \
     --toolchain="msvc" \
-    --enable-lto="thin" \
-    --extra-cflags="$COMMON_FLAGS" \
+    --enable-lto="full" \
+    --extra-cflags="-flto /clang:-O3 -DNDEBUG -march=native" \
+	--extra-cxxflags="-flto /clang:-O3 -DNDEBUG -march=native" \
     --extra-libs="dav1d.lib vulkan-1.lib" \
     --disable-shared \
     --enable-static \
