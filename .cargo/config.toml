@@ -1,16 +1,8 @@
 [alias]
-b-static-vulkan = [
-    "build",
-    "--release",
-    "--features", "static,vship,vcpkg",
-    "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
-]
-
 b-static-nvidia = [
     "build",
     "--release",
-    "--features", "static,vship,nvidia,vcpkg",
+    "--features", "static,vship,nvidia",
     "--config", 
     "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
 ]
@@ -18,7 +10,15 @@ b-static-nvidia = [
 r-static-nvidia = [
     "run",
     "--release",
-    "--features", "static,vship,nvidia,vcpkg",
+    "--features", "static,vship,nvidia",
+    "--config", 
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+]
+
+c-static-nvidia = [
+    "check",
+    "--release",
+    "--features", "static,vship,nvidia",
     "--config", 
     "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
 ]
@@ -26,55 +26,47 @@ r-static-nvidia = [
 b-static-amd = [
     "build",
     "--release",
-    "--features", "static,vship,amd,vcpkg",
+    "--features", "static,vship,amd",
     "--config", 
     "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
 ]
 
-b-termux = [
-    "build",
-    "--release",
-    "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'embed-bitcode=yes']"
-]
-
-b-linux = [
-    "install",
-    "--path",
-    ".",
-    "--features", "vship",
-    "--config",
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests']"
-]
-
-ci-b-static-nvidia = [
-    "build",
-    "--release",
-    "--features", "static,vship,nvidia",
-    "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
-]
-
-ci-b-static-amd = [
-    "build",
+r-static-amd = [
+    "run",
     "--release",
     "--features", "static,vship,amd",
     "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
 ]
 
-ci-b-static-notq = [
-    "build",
+c-static-amd = [
+    "check",
     "--release",
-    "--features", "static",
+    "--features", "static,vship,amd",
     "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
 ]
 
-ci-b-static-vulkan = [
+b-static-vulkan = [
     "build",
     "--release",
     "--features", "static,vship",
     "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+]
+
+r-static-vulkan = [
+    "run",
+    "--release",
+    "--features", "static,vship",
+    "--config", 
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+]
+
+c-static-vulkan = [
+    "check",
+    "--release",
+    "--features", "static,vship",
+    "--config", 
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
 ]
