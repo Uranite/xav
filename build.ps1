@@ -60,7 +60,8 @@ function Update-SessionEnvironment {
 
     $commonPaths = @(
         "$env:ProgramFiles\LLVM\bin",
-        "$env:ProgramFiles\NASM",
+		"$env:ProgramFiles\NASM",
+        "$env:LOCALAPPDATA\bin\NASM",
         "$env:ProgramFiles\Meson",
         "$env:USERPROFILE\.cargo\bin"
     )
