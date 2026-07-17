@@ -16,6 +16,7 @@ Cargo.lock
 /svt-av1-essential-yis
 /Vship
 /install
+/vulkan
 
 # Build
 /target
