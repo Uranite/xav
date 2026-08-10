@@ -1118,7 +1118,7 @@ fn enc_tq_probe_sub(
         frames: pkg.frame_cnt,
     };
 
-    let cmd = make_enc_cmd(ctx.encoder, &cfg);
+    let mut cmd = make_enc_cmd(ctx.encoder, &cfg);
     let mut child = cmd.spawn().unwrap_or_else(|e| fatal(e));
 
     let last_score = pkg
@@ -1257,7 +1257,7 @@ fn enc_chnk_sub(
         frames: pkg.frame_cnt,
     };
 
-    let cmd = make_enc_cmd(ctx.encoder, &cfg);
+    let mut cmd = make_enc_cmd(ctx.encoder, &cfg);
     let mut child = cmd.spawn().unwrap_or_else(|e| fatal(e));
 
     (ctx.watch_enc)(

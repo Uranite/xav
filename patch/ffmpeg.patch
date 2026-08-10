@@ -1,8 +1,8 @@
 diff --git a/configure b/configure
-index 1abf53b..c9e5f39 100755
+index f2896b8..5a3ee1c 100755
 --- a/configure
 +++ b/configure
-@@ -1307,7 +1307,7 @@ test_ld(){
+@@ -1305,7 +1305,7 @@ test_ld(){
      # link.exe and lld-link exit 0 even for unrecognized options, emitting
      # only a warning (LNK4044 / "ignoring unknown argument").  Treat such
      # output as failure so check_ldflags rejects those flags correctly.
@@ -11,7 +11,21 @@ index 1abf53b..c9e5f39 100755
  }
  
  check_ld(){
-@@ -8078,11 +8078,11 @@ check_optflags -fno-math-errno
+@@ -6461,13 +6461,6 @@ probe_libc(){
+         add_${pfx}cppflags -D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_WARNINGS
+         test_${pfx}cpp_condition windows.h "!defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0601" &&
+             add_${pfx}cppflags -D_WIN32_WINNT=0x0601
+-#ifdef WINAPI_FAMILY
+-#include <winapifamily.h>
+-#if !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+-#error not desktop
+-#endif
+-#endif
+-EOF
+         if [ "$pfx" = "" ]; then
+             check_func strtoll || add_allcflags -Dstrtoll=_strtoi64
+             check_func strtoull || add_allcflags -Dstrtoull=_strtoui64
+@@ -8043,11 +8036,11 @@ check_optflags -fno-math-errno
  check_optflags -fno-signed-zeros
  
  if [ -n "$lto" ]; then

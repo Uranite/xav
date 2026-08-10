@@ -1,46 +1,33 @@
-[env]
-RUSTFLAGS = "-C debuginfo=0 -C target-cpu=native -C opt-level=3 -C codegen-units=1 -C strip=symbols -C panic=abort -C linker=clang -C lto=fat -C embed-bitcode=yes -Z panic_abort_tests -Z dylib-lto -C default-linker-libraries=yes -C link-args=-no-pie,-fno-pic,-fuse-ld=lld,-Wl,-O3,-Wl,--lto-O3,-Wl,--as-needed,-Wl,--gc-sections,-Wl,--icf=safe,-Wl,-z,norelro,-Wl,--build-id=none,-Wl,--relax,-Wl,-z,noseparate-code,-Wl,-znow,-Wl,--discard-all,-Wl,--strip-all"
-
-[build]
-rustflags = [
-    "-C", "debuginfo=0",
-    "-C", "target-cpu=native",
-    "-C", "opt-level=3",
-    "-C", "codegen-units=1",
-    "-C", "strip=symbols",
-    "-C", "panic=abort",
-    "-Z", "panic_abort_tests",
-    "-Z", "dylib-lto",
-    "-C", "linker=clang",
-    "-C", "lto=fat",
-    "-C", "embed-bitcode=yes",
-    "-C", "default-linker-libraries=yes",
-    "-C", "link-args=-no-pie -fno-pic -fuse-ld=lld -Wl,-O3 -Wl,--lto-O3 -Wl,--as-needed -Wl,--gc-sections -Wl,--icf=safe -Wl,-z,norelro -Wl,--build-id=none -Wl,--relax -Wl,-z,noseparate-code -Wl,-znow -Wl,--discard-all -Wl,--strip-all",
-]
-
 [alias]
 b-static-nvidia = [
     "build",
     "--release",
-    "--features", "static,vship,nvidia",
+    "--features", "static,vship,nvidia,cuda",
     "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'linker=lld-link', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static', '-C', 'link-arg=/OPT:REF', '-C', 'link-arg=/OPT:ICF', '-C', 'link-arg=/BASE:0x40000000', '-C', 'link-arg=/FIXED']"
 ]
 
 r-static-nvidia = [
     "run",
     "--release",
-    "--features", "static,vship,nvidia",
+    "--features", "static,vship,nvidia,cuda",
     "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'linker=lld-link', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static', '-C', 'link-arg=/OPT:REF', '-C', 'link-arg=/OPT:ICF', '-C', 'link-arg=/BASE:0x40000000', '-C', 'link-arg=/FIXED']"
 ]
 
 c-static-nvidia = [
     "check",
     "--release",
-    "--features", "static,vship,nvidia",
+    "--features", "static,vship,nvidia,cuda",
     "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'linker=lld-link', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static', '-C', 'link-arg=/OPT:REF', '-C', 'link-arg=/OPT:ICF', '-C', 'link-arg=/BASE:0x40000000', '-C', 'link-arg=/FIXED']"
+]
+
+d-static-nvidia = [
+    "build",
+    "--features", "static,vship,nvidia,cuda",
+    "--config", 
+    "build.rustflags=['-C', 'debuginfo=2', '-C', 'target-cpu=native', '-C', 'linker=lld-link', '-C', 'target-feature=+crt-static', '-C', 'link-arg=/BASE:0x40000000', '-C', 'link-arg=/FIXED']"
 ]
 
 b-static-amd = [
@@ -48,7 +35,7 @@ b-static-amd = [
     "--release",
     "--features", "static,vship,amd",
     "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'linker=lld-link', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static', '-C', 'link-arg=/OPT:REF', '-C', 'link-arg=/OPT:ICF', '-C', 'link-arg=/BASE:0x40000000', '-C', 'link-arg=/FIXED']"
 ]
 
 r-static-amd = [
@@ -56,7 +43,7 @@ r-static-amd = [
     "--release",
     "--features", "static,vship,amd",
     "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'linker=lld-link', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static', '-C', 'link-arg=/OPT:REF', '-C', 'link-arg=/OPT:ICF', '-C', 'link-arg=/BASE:0x40000000', '-C', 'link-arg=/FIXED']"
 ]
 
 c-static-amd = [
@@ -64,7 +51,7 @@ c-static-amd = [
     "--release",
     "--features", "static,vship,amd",
     "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'linker=lld-link', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static', '-C', 'link-arg=/OPT:REF', '-C', 'link-arg=/OPT:ICF', '-C', 'link-arg=/BASE:0x40000000', '-C', 'link-arg=/FIXED']"
 ]
 
 b-static-vulkan = [
@@ -72,7 +59,7 @@ b-static-vulkan = [
     "--release",
     "--features", "static,vship",
     "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'linker=lld-link', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static', '-C', 'link-arg=/OPT:REF', '-C', 'link-arg=/OPT:ICF', '-C', 'link-arg=/BASE:0x40000000', '-C', 'link-arg=/FIXED']"
 ]
 
 r-static-vulkan = [
@@ -80,7 +67,7 @@ r-static-vulkan = [
     "--release",
     "--features", "static,vship",
     "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'linker=lld-link', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static', '-C', 'link-arg=/OPT:REF', '-C', 'link-arg=/OPT:ICF', '-C', 'link-arg=/BASE:0x40000000', '-C', 'link-arg=/FIXED']"
 ]
 
 c-static-vulkan = [
@@ -88,5 +75,5 @@ c-static-vulkan = [
     "--release",
     "--features", "static,vship",
     "--config", 
-    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static']"
+    "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=abort', '-C', 'linker=lld-link', '-C', 'lto=fat', '-C', 'embed-bitcode=yes', '-Z', 'dylib-lto', '-Z', 'panic_abort_tests', '-C', 'target-feature=+crt-static', '-C', 'link-arg=/OPT:REF', '-C', 'link-arg=/OPT:ICF', '-C', 'link-arg=/BASE:0x40000000', '-C', 'link-arg=/FIXED']"
 ]

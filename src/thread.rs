@@ -310,16 +310,21 @@ pub fn sleep(dur: Duration) {
 pub type Thread = std::thread::Thread;
 
 #[cfg(not(target_os = "linux"))]
+#[thread_local]
+static PARK_SLOT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+#[cfg(not(target_os = "linux"))]
+pub fn park_state() -> *const u8 {
+    PARK_SLOT.as_ptr().cast()
+}
+
+#[cfg(not(target_os = "linux"))]
 pub struct JoinHandle<T>(std::thread::JoinHandle<T>);
 
 #[cfg(not(target_os = "linux"))]
 impl<T> JoinHandle<T> {
     pub fn join(self) -> T {
         self.0.join().unwrap()
-    }
-
-    pub fn thread(&self) -> Thread {
-        self.0.thread().clone()
     }
 }
 

@@ -14,7 +14,7 @@ use crate::{
     error::Xerr,
     ffms::{AVMEDIA_TYPE_AUDIO, VidInf},
     fs::{DirEntry, File, read_dir, read_to_string as read_to_str, write},
-    io::{Read as _, Seek as _, SeekFrom::Start, Write as _, print_fmt, stdout},
+    io::{Read as _, Seek as _, SeekFrom, Write as _, print_fmt, stdout},
     mkv_mux::{AudioSrc, Aux, mux_mkv},
     mux_webm::mux_webm,
     path::{Path, PathBuf},
@@ -211,7 +211,7 @@ fn concat_ivf(files: &[PathBuf], out: &Path, tot_frames: u32) -> Result<(), Xerr
         pts_off = chunk_max + 1;
     }
 
-    writer.seek(Start(24))?;
+    writer.seek(SeekFrom::Start(24))?;
     writer.write_all(&tot_frames.to_le_bytes())?;
 
     Ok(())

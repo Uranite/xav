@@ -36,6 +36,9 @@ fn build_asm() -> Result<(), Box<dyn Error + Send + Sync>> {
         };
         if let Some(set) = set {
             let mut b = nasm_rs::Build::new();
+            if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+                b.archiver("llvm-lib");
+            }
             b.include("asm");
             b.file("asm/dec.asm");
             b.file("asm/pb.asm");

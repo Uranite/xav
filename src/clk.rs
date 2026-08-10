@@ -5,6 +5,9 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 #[cfg(target_os = "linux")]
 use crate::sys::{clock_mono_ns, clock_real};
 
+#[cfg(not(target_os = "linux"))]
+use std::sync::OnceLock;
+
 #[cfg(target_os = "linux")]
 #[derive(Clone, Copy)]
 pub struct Mono(u64);
@@ -32,6 +35,9 @@ impl Mono {
 }
 
 #[cfg(not(target_os = "linux"))]
+static BASE: OnceLock<Instant> = OnceLock::new();
+
+#[cfg(not(target_os = "linux"))]
 impl Mono {
     #[inline]
     pub fn now() -> Self {
@@ -41,6 +47,12 @@ impl Mono {
     #[inline]
     pub fn elapsed(self) -> Duration {
         self.0.elapsed()
+    }
+
+    #[inline]
+    pub fn raw(self) -> u64 {
+        let d = self.0.duration_since(*BASE.get_or_init(Instant::now));
+        (d.as_secs() as u64) * 1_000_000_000 + u64::from(d.subsec_nanos())
     }
 }
 
