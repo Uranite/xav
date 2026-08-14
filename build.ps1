@@ -407,7 +407,7 @@ function Build-Vship {
 }
 
 function Build-SvtAv1 {
-    param([string]$Variant, [string]$Dir, [string]$Branch, [string]$Repo, [string]$ExtraCFlags, [string]$ArchFlags)
+    param([string]$Variant, [string]$Dir, [string]$Branch, [string]$Repo, [string]$ExtraCFlags, [string]$ArchFlags, [bool]$NeedsPatches)
 
     if (Test-Path 'lib\SvtAv1Enc.lib') {
         Write-Host ""
@@ -444,16 +444,22 @@ function Build-SvtAv1 {
     }
     Push-Location $Dir
 
-    $svtThreadsFile = 'Source\Lib\Codec\svt_threads.c'
-    $content = Get-Content -Raw $svtThreadsFile
-    $content = $content.Replace('1 MiB', '8 MiB').Replace('const size_t min_stack_size = 1024 * 1024;', 'const size_t min_stack_size = 8 * 1024 * 1024;')
-    $content = $content.Replace('0, // default stack size', '8 * 1024 * 1024, // default stack size').Replace('0, // thread active when created', 'STACK_SIZE_PARAM_IS_A_RESERVATION, // thread active when created')
-    Set-Content -Path $svtThreadsFile -Value $content -NoNewline
+    if ($NeedsPatches) {
+        $svtThreadsFile = 'Source\Lib\Codec\svt_threads.c'
+        $content = Get-Content -Raw $svtThreadsFile
+        $content = $content.Replace('1 MiB', '8 MiB').Replace('const size_t min_stack_size = 1024 * 1024;', 'const size_t min_stack_size = 8 * 1024 * 1024;')
+        $content = $content.Replace('0, // default stack size', '8 * 1024 * 1024, // default stack size').Replace('0, // thread active when created', 'STACK_SIZE_PARAM_IS_A_RESERVATION, // thread active when created')
+        Set-Content -Path $svtThreadsFile -Value $content -NoNewline
 
-    $encInterFile = 'Source\Lib\Codec\enc_inter_prediction.c'
-    $content = Get-Content -Raw $encInterFile
-    $content = $content.Replace('void NOINLINE svt_aom_enc_make_inter_predictor(', 'void svt_aom_enc_make_inter_predictor(')
-    Set-Content -Path $encInterFile -Value $content -NoNewline
+        $encInterFile = 'Source\Lib\Codec\enc_inter_prediction.c'
+        $content = Get-Content -Raw $encInterFile
+        $content = $content.Replace('void NOINLINE svt_aom_enc_make_inter_predictor(', 'void svt_aom_enc_make_inter_predictor(')
+        Set-Content -Path $encInterFile -Value $content -NoNewline
+        Write-Host "[INFO] Applied encoder source patches to $Variant." -ForegroundColor Cyan
+    }
+    else {
+        Write-Host "[INFO] Skipping encoder source patches for $Variant (issue already fixed)." -ForegroundColor Cyan
+    }
 
     $pgoDir = "$PWD/svt_pgo_data"
     if (Test-Path $pgoDir) { Remove-Item -Recurse -Force $pgoDir }
@@ -953,17 +959,20 @@ Write-Host "  3. 5fish             (https://github.com/5fish/svt-av1-psy)"
 Write-Host "  4. svt-av1-tritium   (https://github.com/Uranite/svt-av1-tritium)"
 Write-Host "  5. svt-av1-tritium yis branch [testing only, do not use]   (https://github.com/Uranite/svt-av1-tritium/tree/yis)"
 Write-Host "  6. svt-av1-essential yiss fork [testing only, do not use]  (https://github.com/Uranite/SVT-AV1-Essential)"
-$svtChoice = Read-Host "Enter choice (1-6) [Default: 1]"
+Write-Host "  7. svt-av1-mainline    (https://gitlab.com/AOMediaCodec/SVT-AV1)"
+$svtChoice = Read-Host "Enter choice (1-7) [Default: 1]"
     if (-not $svtChoice) { $svtChoice = '1' }
 }
 
+$svtNeedsPatches = $true
 switch ($svtChoice) {
     '1' { $svtVariant = 'svt-av1-hdr'; $svtRepo = 'https://github.com/juliobbv-p/svt-av1-hdr.git'; $svtBranch = ''; $svtDir = 'svt-av1-hdr'; $svtExtraCFlags = '' }
     '2' { $svtVariant = 'svt-av1-essential'; $svtRepo = 'https://github.com/nekotrix/SVT-AV1-Essential.git'; $svtBranch = ''; $svtDir = 'SVT-AV1-Essential'; $svtExtraCFlags = '' }
     '3' { $svtVariant = '5fish'; $svtRepo = 'https://github.com/5fish/svt-av1-psy.git'; $svtBranch = ''; $svtDir = '5fish-svt-av1-psy'; $svtExtraCFlags = '-DSVT_LOG_QUIET' }
-    '4' { $svtVariant = 'svt-av1-tritium'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = ''; $svtDir = 'svt-av1-tritium'; $svtExtraCFlags = '' }
-    '5' { $svtVariant = 'svt-av1-tritium-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = 'yis'; $svtDir = 'svt-av1-tritium-yis'; $svtExtraCFlags = '' }
+    '4' { $svtVariant = 'svt-av1-tritium'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = ''; $svtDir = 'svt-av1-tritium'; $svtExtraCFlags = ''; $svtNeedsPatches = $false }
+    '5' { $svtVariant = 'svt-av1-tritium-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = 'yis'; $svtDir = 'svt-av1-tritium-yis'; $svtExtraCFlags = ''; $svtNeedsPatches = $false }
     '6' { $svtVariant = 'svt-av1-essential-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-essential.git'; $svtBranch = ''; $svtDir = 'svt-av1-essential-yis'; $svtExtraCFlags = '' }
+    '7' { $svtVariant = 'svt-av1-mainline'; $svtRepo = 'https://gitlab.com/AOMediaCodec/SVT-AV1.git'; $svtBranch = ''; $svtDir = 'svt-av1-mainline'; $svtExtraCFlags = ''; $svtNeedsPatches = $false }
     default {
         Write-Host "[ERROR] Invalid choice." -ForegroundColor Red
         exit 1
@@ -1064,7 +1073,7 @@ Build-Dav1d
 Build-Opus
 Build-Vulkan -VsPath $vsPath
 Build-FFmpeg -VsPath $vsPath -MsysExe $msysExe
-Build-SvtAv1 -Variant $svtVariant -Dir $svtDir -Branch $svtBranch -Repo $svtRepo -ExtraCFlags $svtExtraCFlags -ArchFlags $svtArchFlags
+Build-SvtAv1 -Variant $svtVariant -Dir $svtDir -Branch $svtBranch -Repo $svtRepo -ExtraCFlags $svtExtraCFlags -ArchFlags $svtArchFlags -NeedsPatches $svtNeedsPatches
 Build-Xav -Backend $vshipBackend -SvtChoice $svtChoice -enableTQ $enableTQ
 
 Write-Host "[SUCCESS] Build script finished." -ForegroundColor Green

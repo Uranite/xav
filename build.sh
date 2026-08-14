@@ -609,10 +609,18 @@ build_svtav1() {
         sed -i '/gnull/s/^/#/' CMakeLists.txt
         sed -i 's|"${LLVM_PROFDATA} merge --sparse=true \*.profraw -o default.profdata"|"cd ${SVT_AV1_PGO_DIR} \&\& ${LLVM_PROFDATA} merge --sparse=true *.profraw -o default.profdata"|' CMakeLists.txt
 
-        # 8 MB thread stacks (default 1 MiB overflows with PGO)
-        sed -i 's|0, // default stack size|8 * 1024 * 1024, // default stack size|' Source/Lib/Codec/svt_threads.c
-        sed -i 's|0, // thread active when created|STACK_SIZE_PARAM_IS_A_RESERVATION, // thread active when created|' Source/Lib/Codec/svt_threads.c
-        sed -i 's|const size_t min_stack_size = 1024 \* 1024;|const size_t min_stack_size = 8 * 1024 * 1024;|' Source/Lib/Codec/svt_threads.c
+        # 8 MB thread stacks (default 1 MiB overflows with PGO).
+        # svt-av1-mainline and svt-av1-tritium already fixed the issue in a different way, so skip them.
+        case "${svt_fork_name}" in
+                "mainline" | "tritium"*)
+                        loginf b "Skipping encoder source patches for ${svt_fork_name} (issue already fixed)"
+                        ;;
+                *)
+                        sed -i 's|0, // default stack size|8 * 1024 * 1024, // default stack size|' Source/Lib/Codec/svt_threads.c
+                        sed -i 's|0, // thread active when created|STACK_SIZE_PARAM_IS_A_RESERVATION, // thread active when created|' Source/Lib/Codec/svt_threads.c
+                        sed -i 's|const size_t min_stack_size = 1024 \* 1024;|const size_t min_stack_size = 8 * 1024 * 1024;|' Source/Lib/Codec/svt_threads.c
+                        ;;
+        esac
 
         mkdir -p "${pgo_dir}"
         loginf b "Downloading PGO training video"
