@@ -73,6 +73,25 @@ fn triple(path: &str, key: &str, parts: [&str; 3]) -> Option<String> {
     }
 }
 
+fn svt_ver(dir: &str) -> Option<String> {
+    let url = git(dir, &["remote", "get-url", "origin"]);
+    let base = url
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches(".git");
+    let fork = base
+        .strip_prefix("SVT-AV1-")
+        .or_else(|| base.strip_prefix("svt-av1-"))
+        .map_or_else(String::new, |f| format!("-{f}"));
+    triple(
+        &format!("{dir}/Source/API/EbSvtAv1.h"),
+        "#define SVT_AV1_VERSION_",
+        ["MAJOR", "MINOR", "PATCHLEVEL"],
+    )
+    .map(|v| v + &fork)
+}
+
 #[cfg(all(feature = "vship", feature = "cuda"))]
 fn cuda_ver() -> String {
     ["/opt/cuda", "/usr/local/cuda"]
@@ -80,6 +99,23 @@ fn cuda_ver() -> String {
         .find_map(|d| {
             field(
                 &format!("{d}/include/cuda_runtime_api.h"),
+                "#define CUDART_VERSION",
+            )
+        })
+        .and_then(|v| v.parse::<u32>().ok())
+        .map_or_else(
+            || "unknown".to_owned(),
+            |n| format!("{}.{}.{}", n / 1000, n % 1000 / 10, n % 10),
+        )
+}
+
+#[cfg(all(feature = "vship", feature = "cuda"))]
+fn cuda_ver_win() -> String {
+    env::var("CUDA_PATH")
+        .ok()
+        .and_then(|p| {
+            field(
+                &format!("{p}/include/cuda_runtime_api.h"),
                 "#define CUDART_VERSION",
             )
         })
@@ -132,6 +168,32 @@ fn gpu() -> String {
     "unknown".to_owned()
 }
 
+#[cfg(feature = "vship")]
+fn gpu_win() -> String {
+    Command::new("nvidia-smi")
+        .args(["--query-gpu=driver_version", "--format=csv,noheader"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .map(|v| format!("NVIDIA {v}"))
+        .unwrap_or_else(|| {
+            Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    "Get-CimInstance Win32_VideoController | Select-Object -First 1 | ForEach-Object { $_.Name + ' ' + $_.DriverVersion }",
+                ])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "unknown".to_owned())
+        })
+}
+
 #[cfg(feature = "vvenc")]
 const VVENC_LAYOUT: &str = r#"#include <cstddef>
 #include "vvenc/vvencCfg.h"
@@ -177,26 +239,7 @@ fn stamp_versions(home: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     );
 
     let svt = format!("{src}/SVT-AV1");
-    let url = git(&svt, &["remote", "get-url", "origin"]);
-    let base = url
-        .rsplit('/')
-        .next()
-        .unwrap_or_default()
-        .trim_end_matches(".git");
-    let fork = base
-        .strip_prefix("SVT-AV1-")
-        .or_else(|| base.strip_prefix("svt-av1-"))
-        .map_or_else(String::new, |f| format!("-{f}"));
-    stamp(
-        "SVT",
-        triple(
-            &format!("{svt}/Source/API/EbSvtAv1.h"),
-            "#define SVT_AV1_VERSION_",
-            ["MAJOR", "MINOR", "PATCHLEVEL"],
-        )
-        .map(|v| v + &fork),
-        &svt,
-    );
+    stamp("SVT", svt_ver(&svt), &svt);
 
     let dav1d = format!("{src}/dav1d");
     stamp(
@@ -270,6 +313,90 @@ fn stamp_versions(home: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
         }
 
         println!("cargo:rustc-env=XAV_V_GPU={}", gpu());
+    }
+
+    Ok(())
+}
+
+fn stamp_versions_win() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let manifest = env::var("CARGO_MANIFEST_DIR")?;
+
+    stamp("XAV", env::var("CARGO_PKG_VERSION").ok(), &manifest);
+
+    let svt = format!("{manifest}/SVT-AV1");
+    stamp("SVT", svt_ver(&svt), &svt);
+    let dav1d = format!("{manifest}/dav1d");
+    stamp(
+        "DAV1D",
+        field(&format!("{dav1d}/meson.build"), "version:"),
+        &dav1d,
+    );
+
+    #[cfg(feature = "avm")]
+    {
+        let avm = format!("{manifest}/avm");
+        stamp(
+            "AVM",
+            field(
+                &format!("{avm}/build/config/avm_version.h"),
+                "#define VERSION_STRING_NOSP",
+            )
+            .map(|v| v.trim_start_matches('v').to_owned()),
+            &avm,
+        );
+    }
+
+    #[cfg(feature = "vvenc")]
+    {
+        let vvenc = format!("{manifest}/vvenc");
+        stamp(
+            "VVENC",
+            field(&format!("{vvenc}/CMakeLists.txt"), "project( vvenc VERSION"),
+            &vvenc,
+        );
+        check_vvenc_layout(&vvenc)?;
+
+        #[cfg(feature = "vship")]
+        {
+            let vvdec = format!("{manifest}/vvdec");
+            stamp(
+                "VVDEC",
+                field(&format!("{vvdec}/CMakeLists.txt"), "project( vvdec VERSION"),
+                &vvdec,
+            );
+        }
+    }
+
+    #[cfg(feature = "vship")]
+    {
+        let vship = format!("{manifest}/Vship");
+        stamp(
+            "VSHIP",
+            triple(
+                &format!("{vship}/Makefile"),
+                "VSHIP_VERSION_",
+                ["MAJOR=", "MINOR=", "MINORMINOR="],
+            ),
+            &vship,
+        );
+
+        #[cfg(feature = "cuda")]
+        println!("cargo:rustc-env=XAV_V_CUDA={}", cuda_ver_win());
+
+        #[cfg(not(feature = "cuda"))]
+        {
+            let vk = format!("{manifest}/vulkan/Vulkan-Loader");
+            stamp(
+                "VULKAN",
+                field(
+                    &format!("{vk}/CMakeLists.txt"),
+                    "project(VULKAN_LOADER VERSION",
+                ),
+                &vk,
+            );
+        }
+
+        println!("cargo:rustc-env=XAV_V_GPU={}", gpu_win());
     }
 
     Ok(())
@@ -391,6 +518,7 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
 fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    stamp_versions_win()?;
 
     build_asm()?;
 

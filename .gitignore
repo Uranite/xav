@@ -8,12 +8,7 @@ Cargo.lock
 /dav1d
 /FFmpeg
 /opus
-/svt-av1-hdr
-/svt-av1-essential
-/5fish-svt-av1-psy
-/svt-av1-tritium
-/svt-av1-tritium-yis
-/svt-av1-essential-yis
+/SVT-AV1
 /Vship
 /install
 /vulkan
