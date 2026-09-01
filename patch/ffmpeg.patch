@@ -1,8 +1,8 @@
 diff --git a/configure b/configure
-index 1abf53b..c9e5f39 100755
+index 21128a8..b2c71b3 100755
 --- a/configure
 +++ b/configure
-@@ -1307,7 +1307,7 @@ test_ld(){
+@@ -1309,7 +1309,7 @@ test_ld(){
      # link.exe and lld-link exit 0 even for unrecognized options, emitting
      # only a warning (LNK4044 / "ignoring unknown argument").  Treat such
      # output as failure so check_ldflags rejects those flags correctly.
@@ -11,7 +11,7 @@ index 1abf53b..c9e5f39 100755
  }
  
  check_ld(){
-@@ -8078,11 +8078,11 @@ check_optflags -fno-math-errno
+@@ -8071,11 +8071,11 @@ check_optflags -fno-math-errno
  check_optflags -fno-signed-zeros
  
  if [ -n "$lto" ]; then
