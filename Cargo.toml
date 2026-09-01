@@ -12,7 +12,6 @@ keywords = ["av1", "av2", "vvc", "cvvdp", "video", "multimedia", "encoding", "qu
 categories = ["multimedia::video", "command-line-utilities"]
 
 [features]
-default = [ "vship","cuda","avm","vvenc" ]
 vship = []
 cuda = []
 avm = []

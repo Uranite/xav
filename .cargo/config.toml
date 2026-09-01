@@ -28,7 +28,7 @@ build-std = ["core", "alloc"]
 b-static-nvidia = [
     "build",
     "--release",
-    "--features", "static,vship,nvidia",
+    "--features", "static,vship,nvidia,cuda",
     "--config",
     "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=immediate-abort', '-Z', 'unstable-options', '-C', 'linker=lld-link', '-C', 'lto=thin', '-C', 'embed-bitcode=yes', '-C', 'default-linker-libraries=yes', '-C', 'relocation-model=static', '-Z', 'panic_abort_tests', '-Z', 'location-detail=none', '-Z', 'fmt-debug=none', '-C', 'target-feature=+crt-static', '-C', 'link-arg=/OPT:REF', '-C', 'link-arg=/OPT:ICF']"
 ]
@@ -36,7 +36,7 @@ b-static-nvidia = [
 r-static-nvidia = [
     "run",
     "--release",
-    "--features", "static,vship,nvidia",
+    "--features", "static,vship,nvidia,cuda",
     "--config",
     "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=immediate-abort', '-Z', 'unstable-options', '-C', 'linker=lld-link', '-C', 'lto=thin', '-C', 'embed-bitcode=yes', '-C', 'default-linker-libraries=yes', '-C', 'relocation-model=static', '-Z', 'panic_abort_tests', '-Z', 'location-detail=none', '-Z', 'fmt-debug=none', '-C', 'target-feature=+crt-static', '-C', 'link-arg=/OPT:REF', '-C', 'link-arg=/OPT:ICF']"
 ]
@@ -44,14 +44,14 @@ r-static-nvidia = [
 c-static-nvidia = [
     "check",
     "--release",
-    "--features", "static,vship,nvidia",
+    "--features", "static,vship,nvidia,cuda",
     "--config",
     "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=immediate-abort', '-Z', 'unstable-options', '-C', 'linker=lld-link', '-C', 'lto=thin', '-C', 'embed-bitcode=yes', '-C', 'default-linker-libraries=yes', '-C', 'relocation-model=static', '-Z', 'panic_abort_tests', '-Z', 'location-detail=none', '-Z', 'fmt-debug=none', '-C', 'target-feature=+crt-static', '-C', 'link-arg=/OPT:REF', '-C', 'link-arg=/OPT:ICF']"
 ]
 
 d-static-nvidia = [
     "build",
-    "--features", "static,vship,nvidia",
+    "--features", "static,vship,nvidia,cuda",
     "--config",
     "build.rustflags=['-C', 'debuginfo=2', '-C', 'target-cpu=native', '-C', 'force-frame-pointers=yes', '-C', 'linker=lld-link', '-C', 'target-feature=+crt-static']"
 ]
