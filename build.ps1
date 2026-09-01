@@ -436,14 +436,28 @@ function Build-SvtAv1 {
     Write-Host "[INFO] Detected AVX512 support: $avx512Supported. SVT-AV1 will be built with -DENABLE_AVX512=$svtAvx512Flag." -ForegroundColor Cyan
 
     if (Test-Path $Dir) {
-        Push-Location $Dir
-        git pull
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "[WARNING] git pull failed. Forcing sync with remote..." -ForegroundColor Yellow
-            git fetch
-            git reset --hard '@{u}'
+
+        $existingRemote = git -C $Dir remote get-url origin 2>$null | Select-Object -First 1
+        if ($existingRemote -ne $Repo) {
+            Write-Host "[INFO] SVT fork changed from $existingRemote to $Repo. Re-cloning..." -ForegroundColor Cyan
+            Remove-Item -Recurse -Force $Dir
+            if ($Branch) {
+                git clone --depth 300 --branch $Branch $Repo $Dir
+            }
+            else {
+                git clone --depth 300 $Repo $Dir
+            }
         }
-        Pop-Location
+        else {
+            Push-Location $Dir
+            git pull
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[WARNING] git pull failed. Forcing sync with remote..." -ForegroundColor Yellow
+                git fetch
+                git reset --hard '@{u}'
+            }
+            Pop-Location
+        }
     }
     else {
         if ($Branch) {
@@ -1017,12 +1031,12 @@ $svtChoice = Read-Host "Enter choice (1-6) [Default: 1]"
 }
 
 switch ($svtChoice) {
-    '1' { $svtVariant = 'svt-av1-hdr'; $svtRepo = 'https://github.com/juliobbv-p/svt-av1-hdr.git'; $svtBranch = ''; $svtDir = 'svt-av1-hdr'; $svtExtraCFlags = '' }
-    '2' { $svtVariant = 'svt-av1-essential'; $svtRepo = 'https://github.com/nekotrix/SVT-AV1-Essential.git'; $svtBranch = ''; $svtDir = 'SVT-AV1-Essential'; $svtExtraCFlags = '' }
-    '3' { $svtVariant = '5fish'; $svtRepo = 'https://github.com/5fish/svt-av1-psy.git'; $svtBranch = ''; $svtDir = '5fish-svt-av1-psy'; $svtExtraCFlags = '-DSVT_LOG_QUIET' }
-    '4' { $svtVariant = 'svt-av1-tritium'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = ''; $svtDir = 'svt-av1-tritium'; $svtExtraCFlags = '' }
-    '5' { $svtVariant = 'svt-av1-tritium-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = 'yis'; $svtDir = 'svt-av1-tritium-yis'; $svtExtraCFlags = '' }
-    '6' { $svtVariant = 'svt-av1-essential-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-essential.git'; $svtBranch = ''; $svtDir = 'svt-av1-essential-yis'; $svtExtraCFlags = '' }
+    '1' { $svtVariant = 'svt-av1-hdr'; $svtRepo = 'https://github.com/juliobbv-p/svt-av1-hdr.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
+    '2' { $svtVariant = 'svt-av1-essential'; $svtRepo = 'https://github.com/nekotrix/SVT-AV1-Essential.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
+    '3' { $svtVariant = '5fish'; $svtRepo = 'https://github.com/5fish/svt-av1-psy.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '-DSVT_LOG_QUIET' }
+    '4' { $svtVariant = 'svt-av1-tritium'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
+    '5' { $svtVariant = 'svt-av1-tritium-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = 'yis'; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
+    '6' { $svtVariant = 'svt-av1-essential-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-essential.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
     default {
         Write-Host "[ERROR] Invalid choice." -ForegroundColor Red
         exit 1
