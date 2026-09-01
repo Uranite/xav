@@ -319,6 +319,11 @@ function Install-Dependencies {
     if (-not (Assert-Command 'clang')) { Write-Host "[ERROR] clang not found after LLVM setup." -ForegroundColor Red; exit 1 }
     if (-not (Assert-Command 'clang++')) { Write-Host "[ERROR] clang++ not found after LLVM setup." -ForegroundColor Red; exit 1 }
     if (-not (Assert-Command 'llvm-ar')) { Write-Host "[ERROR] llvm-ar not found after LLVM setup." -ForegroundColor Red; exit 1 }
+    if (-not (Assert-Command 'llvm-lib')) { Write-Host "[ERROR] llvm-lib not found after LLVM setup." -ForegroundColor Red; exit 1 }
+    if (-not (Assert-Command 'llvm-nm')) { Write-Host "[ERROR] llvm-nm not found after LLVM setup." -ForegroundColor Red; exit 1 }
+    if (-not (Assert-Command 'llvm-ranlib')) { Write-Host "[ERROR] llvm-ranlib not found after LLVM setup." -ForegroundColor Red; exit 1 }
+    if (-not (Assert-Command 'llvm-strip')) { Write-Host "[ERROR] llvm-strip not found after LLVM setup." -ForegroundColor Red; exit 1 }
+    if (-not (Assert-Command 'lld-link')) { Write-Host "[ERROR] lld-link not found after LLVM setup." -ForegroundColor Red; exit 1 }
     if (-not (Assert-Command 'nasm')) { Write-Host "[ERROR] nasm not found after NASM setup." -ForegroundColor Red; exit 1 }
 
     Write-Host "[INFO] Setting Rust toolchain to nightly..." -ForegroundColor Cyan
@@ -327,10 +332,12 @@ function Install-Dependencies {
         Write-Host "[ERROR] Failed to set Rust toolchain to nightly." -ForegroundColor Red; exit 1
     }
 
-    if (-not $env:VULKAN_SDK) {
-        Write-Host "[INFO] Vulkan SDK is always required for the hwaccel feature." -ForegroundColor Cyan
-        Confirm-Install "Vulkan SDK" "KhronosGroup.VulkanSDK"
-        if (-not $env:VULKAN_SDK) { Write-Host "[ERROR] VULKAN_SDK not found. Try restarting your terminal, or set VULKAN_SDK manually." -ForegroundColor Red; exit 1 }
+    if ($VshipBackend -eq 'vulkan') {
+        if (-not $env:VULKAN_SDK) {
+            Write-Host "[INFO] Vulkan SDK is required for the vulkan vship backend." -ForegroundColor Cyan
+            Confirm-Install "Vulkan SDK" "KhronosGroup.VulkanSDK"
+            if (-not $env:VULKAN_SDK) { Write-Host "[ERROR] VULKAN_SDK not found. Try restarting your terminal, or set VULKAN_SDK manually." -ForegroundColor Red; exit 1 }
+        }
     }
 
     Install-GpuSdk -VshipBackend $VshipBackend -VsIncludeV143 $VsIncludeV143
@@ -407,12 +414,17 @@ function Build-Vship {
 }
 
 function Build-SvtAv1 {
-    param([string]$Variant, [string]$Dir, [string]$Branch, [string]$Repo, [string]$ExtraCFlags, [string]$ArchFlags)
+    param([string]$Variant, [string]$Dir, [string]$Branch, [string]$Repo, [string]$ExtraCFlags, [string]$ArchFlags, [bool]$NoPrompt)
 
     if (Test-Path 'lib\SvtAv1Enc.lib') {
-        Write-Host ""
-        Write-Host "[PROMPT] $Variant is already compiled." -ForegroundColor Yellow
-        $choice = Read-Host "Do you want to update and recompile ${Variant}? (Y/N) [Default: N]"
+        if ($NoPrompt) {
+            $choice = if ($ForceRebuild) { 'Y' } else { 'N' }
+        }
+        else {
+            Write-Host ""
+            Write-Host "[PROMPT] $Variant is already compiled." -ForegroundColor Yellow
+            $choice = Read-Host "Do you want to update and recompile ${Variant}? (Y/N) [Default: N]"
+        }
         if ($choice -notmatch '^[Yy]') {
             Write-Host "[INFO] Skipping $Variant compilation..." -ForegroundColor Cyan
             return
@@ -606,6 +618,29 @@ function Build-Vulkan {
     }
 }
 
+function Build-NvHeaders {
+    param([string]$MsysExe)
+    if (Test-Path 'nv-codec-headers\install\lib\pkgconfig\ffnvcodec.pc') {
+        Write-Host "[INFO] nv-codec-headers already installed. Skipping..." -ForegroundColor Cyan
+    }
+    else {
+        if (Test-Path 'nv-codec-headers') {
+            Push-Location nv-codec-headers
+            git pull
+            Pop-Location
+        }
+        else {
+            git clone --depth 1 https://github.com/FFmpeg/nv-codec-headers.git
+        }
+        Push-Location nv-codec-headers
+        $unixPwd = $PWD.Path -replace '\\', '/'
+        Invoke-Step "Installing nv-codec-headers" {
+            & $MsysExe -lc "cd `"$unixPwd`" && make install PREFIX=`"$unixPwd/install`""
+        }
+        Pop-Location
+    }
+}
+
 # dav1d
 function Build-Dav1d {
     if (Test-Path 'lib\dav1d.lib') {
@@ -669,10 +704,16 @@ function Build-Dav1d {
 }
 
 function Build-FFmpeg {
-    param([string]$VsPath, [string]$MsysExe)
+    param([string]$VsPath, [string]$MsysExe, [string]$Backend)
     
     $env:INCLUDE = "$PWD\dav1d\include;$PWD\dav1d\build\include;$PWD\install\include;$env:INCLUDE"
-    $env:LIB = "$PWD\lib;$PWD\install\lib;$env:LIB"
+    if ($Backend -eq 'cuda') {
+        $env:INCLUDE = "$env:CUDA_PATH\include;$env:INCLUDE"
+        $env:LIB = "$env:CUDA_PATH\lib\x64;$PWD\lib;$PWD\install\lib;$env:LIB"
+    }
+    else {
+        $env:LIB = "$PWD\lib;$PWD\install\lib;$env:LIB"
+    }
 
     if (Test-Path 'lib\avcodec.lib') {
         Write-Host "[INFO] FFmpeg already compiled. Skipping..." -ForegroundColor Cyan
@@ -689,6 +730,31 @@ function Build-FFmpeg {
         git apply "..\patch\ffmpeg.patch"
         Invoke-Step "Building FFmpeg" {
             $llvmBinWin = "C:\Program Files\LLVM\bin"
+
+            if ($Backend -eq 'cuda') {
+                $hwArgs = @'
+    --enable-ffnvcodec \
+    --enable-nvdec \
+    --enable-cuvid \
+    --enable-decoder=h264_cuvid \
+    --enable-decoder=hevc_cuvid \
+    --enable-decoder=av1_cuvid \
+    --enable-decoder=vp9_cuvid \
+    --enable-decoder=vc1_cuvid \
+'@
+                $hwPkgConfig = 'export PKG_CONFIG_PATH="$(pwd)/../nv-codec-headers/install/lib/pkgconfig:$PKG_CONFIG_PATH"'
+            }
+            else {
+                $hwArgs = @'
+    --enable-vulkan \
+    --enable-hwaccel=h264_vulkan \
+    --enable-hwaccel=hevc_vulkan \
+    --enable-hwaccel=av1_vulkan \
+    --enable-hwaccel=vp9_vulkan \
+'@
+                $hwPkgConfig = ""
+            }
+
             $bashScript = @"
 #!/bin/sh
 set -e
@@ -712,7 +778,6 @@ export PKG_CONFIG_PATH="$(pwd)/../install/lib/pkgconfig"
     --enable-lto="full" \
     --extra-cflags="-flto /clang:-O3 -DNDEBUG -march=native" \
 	--extra-cxxflags="-flto /clang:-O3 -DNDEBUG -march=native" \
-    --extra-libs="dav1d.lib vulkan-1.lib" \
     --disable-shared \
     --enable-static \
     --pkg-config-flags="--static" \
@@ -817,17 +882,14 @@ export PKG_CONFIG_PATH="$(pwd)/../install/lib/pkgconfig"
     --enable-parser=opus \
     --enable-parser=vorbis \
     --enable-parser=flac \
-    --enable-vulkan \
-    --enable-hwaccel=h264_vulkan \
-    --enable-hwaccel=hevc_vulkan \
-    --enable-hwaccel=av1_vulkan \
-    --enable-hwaccel=vp9_vulkan \
+    __HW_ARGS__
     --enable-bsf=extract_extradata \
     --enable-demuxer=ogg \
     --enable-filter=scale \
     --enable-filter=format
 make -j$(nproc)
 '@
+            $bashScript = $bashScript.Replace('export PKG_CONFIG_PATH="$(pwd)/../install/lib/pkgconfig"', 'export PKG_CONFIG_PATH="$(pwd)/../install/lib/pkgconfig"' + "`n" + $hwPkgConfig).Replace('__HW_ARGS__', $hwArgs.TrimEnd([char[]]("`n", "`r")))
             Set-Content -Path 'build_ffmpeg.sh' -Value $bashScript -Encoding Ascii
             $env:MSYS2_PATH_TYPE = 'inherit'
             $unixPath = $PWD.Path -replace '\\', '/'
@@ -856,13 +918,15 @@ function Build-Xav {
         '-Z', 'dylib-lto',
         '-Z', 'panic_abort_tests',
         '-C', 'link-arg=/OPT:REF',
-        '-C', 'link-arg=/OPT:ICF'
+        '-C', 'link-arg=/OPT:ICF',
+        '-C', 'link-arg=/BASE:0x40000000',
+        '-C', 'link-arg=/FIXED'
     ) -join ' '
 
     $features = "static"
     if ($enableTQ) {
         $features += ",vship"
-        if ($Backend -eq 'cuda') { $features += ",nvidia" }
+        if ($Backend -eq 'cuda') { $features += ",nvidia,cuda" }
         elseif ($Backend -eq 'hip') { $features += ",amd" }
     }
 
@@ -875,12 +939,7 @@ function Build-Xav {
 
     Invoke-Step "Cargo build ($Backend)" {
         cargo update
-        if ($enableTQ) {
-            cargo build --release --features $features
-        }
-        else {
-            cargo build --release --features $features --no-default-features
-        }
+        cargo build --release --features $features --no-default-features
     }
 
     Write-Host ""
@@ -1062,9 +1121,14 @@ if ($enableTQ) {
 }
 Build-Dav1d
 Build-Opus
-Build-Vulkan -VsPath $vsPath
-Build-FFmpeg -VsPath $vsPath -MsysExe $msysExe
-Build-SvtAv1 -Variant $svtVariant -Dir $svtDir -Branch $svtBranch -Repo $svtRepo -ExtraCFlags $svtExtraCFlags -ArchFlags $svtArchFlags
+if ($vshipBackend -ne 'cuda') {
+    Build-Vulkan -VsPath $vsPath
+}
+if ($vshipBackend -eq 'cuda') {
+    Build-NvHeaders -MsysExe $msysExe
+}
+Build-FFmpeg -VsPath $vsPath -MsysExe $msysExe -Backend $vshipBackend
+Build-SvtAv1 -Variant $svtVariant -Dir $svtDir -Branch $svtBranch -Repo $svtRepo -ExtraCFlags $svtExtraCFlags -ArchFlags $svtArchFlags -NoPrompt $NoPrompt
 Build-Xav -Backend $vshipBackend -SvtChoice $svtChoice -enableTQ $enableTQ
 
 Write-Host "[SUCCESS] Build script finished." -ForegroundColor Green
