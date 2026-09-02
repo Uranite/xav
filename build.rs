@@ -527,6 +527,7 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
         #[cfg(feature = "vship")]
         println!("cargo:rustc-link-lib=libvship");
         println!("cargo:rustc-link-lib=SvtAv1Enc");
+        #[cfg(not(feature = "cuda"))]
         println!("cargo:rustc-link-lib=vulkan-1");
     } else {
         let mut lib_path = PathBuf::from(&manifest_dir);
@@ -534,6 +535,7 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
         println!("cargo:rustc-link-search=native={}", lib_path.display());
         println!("cargo:rustc-link-lib=static=opus");
         println!("cargo:rustc-link-lib=static=SvtAv1Enc");
+        #[cfg(not(feature = "cuda"))]
         println!("cargo:rustc-link-lib=vulkan-1");
 
         #[cfg(feature = "vship")]
@@ -618,6 +620,23 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
         // for lib in sys_libs {
         //     println!("cargo:rustc-link-lib={}", lib);
         // }
+    }
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        // Our asm indexes rodata tables as [table + reg*scale] amd64
+        // cant encode rip-relative; nasm emits a 32-bit absolute
+        // displacement (ADDR32)
+        let args: &[&str] = if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+            &["/BASE:0x10000000", "/FIXED"]
+        } else {
+            &[
+                "-Wl,--image-base=0x10000000",
+                "-Wl,--disable-dynamicbase",
+                "-Wl,--disable-reloc-section",
+            ]
+        };
+        for a in args {
+            println!("cargo:rustc-link-arg={a}");
+        }
     }
     Ok(())
 }
