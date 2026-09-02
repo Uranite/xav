@@ -413,6 +413,175 @@ function Build-Vship {
     }
 }
 
+function Patch-SvtAv1Sources {
+    param([string]$Variant)
+
+    # should be fixed in mainline/tritium
+    $apply8MbStackPatch = $Variant -notin @('svt-av1-tritium', 'svt-av1-tritium-yis', 'mainline')
+
+    $cmakeFile = 'CMakeLists.txt'
+    $content = (Get-Content -Raw $cmakeFile).Replace("`r`n", "`n")
+    $content = $content.Replace('set(CMAKE_POSITION_INDEPENDENT_CODE ON)', 'set(CMAKE_POSITION_INDEPENDENT_CODE OFF)')
+    $content = $content.Replace('set(CMAKE_C_STANDARD 99)', 'set(CMAKE_C_STANDARD 23)')
+    $content = $content.Replace('set(CMAKE_CXX_STANDARD 11)', 'set(CMAKE_CXX_STANDARD 23)')
+    $commentOutPats = @('relro', 'mno-avx', 'fstack-protector-strong', 'FORTIFY_SOURCE', 'gdwarf', 'gnull')
+    $lines = $content.Split("`n")
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        foreach ($pat in $commentOutPats) {
+            if ($lines[$i].Contains($pat)) { $lines[$i] = '#' + $lines[$i]; break }
+        }
+    }
+    $content = [string]::Join("`n", $lines)
+    Set-Content -Path $cmakeFile -Value $content -NoNewline
+
+    if ($apply8MbStackPatch) {
+        $threadsFile = 'Source\Lib\Codec\svt_threads.c'
+        $content = (Get-Content -Raw $threadsFile).Replace("`r`n", "`n")
+        $content = $content.Replace('1 MiB', '8 MiB').Replace('const size_t min_stack_size = 1024 * 1024;', 'const size_t min_stack_size = 8 * 1024 * 1024;')
+        $content = $content.Replace('0, // default stack size', '8 * 1024 * 1024, // default stack size').Replace('0, // thread active when created', 'STACK_SIZE_PARAM_IS_A_RESERVATION, // thread active when created')
+        Set-Content -Path $threadsFile -Value $content -NoNewline
+    }
+
+    $encHandleFile = 'Source\Lib\Globals\enc_handle.c'
+    $content = (Get-Content -Raw $encHandleFile).Replace("`r`n", "`n")
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $content.Split("`n")) { $lines.Add($l) }
+
+    $rangeStart = '    svt_aom_setup_common_rtcd_internal(scs->static_config.use_cpu_flags);'
+    $rangeEnd   = '    svt_aom_build_blk_geom(scs->svt_aom_geom_idx, scs->blk_geom_mds);'
+    $startIdx = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -eq $rangeStart) { $startIdx = $i; break }
+    }
+    if ($startIdx -ge 0) {
+        $endIdx = -1
+        for ($i = $startIdx + 1; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -eq $rangeEnd) { $endIdx = $i; break }
+        }
+        if ($endIdx -ge 0) {
+            $lines.RemoveRange($startIdx, $endIdx - $startIdx + 1)
+            $repl = @(
+                '    return_error = svt_shared_setup(scs);',
+                '    if (return_error != EB_ErrorNone)',
+                '        return return_error;'
+            )
+            for ($j = $repl.Length - 1; $j -ge 0; $j--) { $lines.Insert($startIdx, $repl[$j]) }
+        }
+    }
+
+    $joined = [string]::Join("`n", $lines)
+    if ($joined -notmatch 'init_shared_rtcd') {
+        $anchorIdx = -1
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -eq 'DEFINE_ONCE(global_tables_once);') { $anchorIdx = $i; break }
+        }
+        if ($anchorIdx -ge 0) {
+            $sharedSetup = @(
+                '',
+                'static uint64_t          shared_cpu_flags;',
+                'static uint32_t          shared_geom_idx;',
+                'static uint16_t          shared_geom_cnt;',
+                'static struct BlockGeom *shared_blk_geom;',
+                'static uint32_t          shared_blk_geom_idx;',
+                '',
+                'static ONCE_ROUTINE(init_shared_rtcd) {',
+                '    svt_aom_setup_common_rtcd_internal(shared_cpu_flags);',
+                '    svt_aom_setup_rtcd_internal(shared_cpu_flags);',
+                '    ONCE_ROUTINE_EPILOG;',
+                '}',
+                'DEFINE_ONCE(shared_rtcd_once);',
+                '',
+                'static ONCE_ROUTINE(init_shared_blk_geom) {',
+                '    shared_blk_geom_idx = shared_geom_idx;',
+                '    EB_MALLOC_ARRAY_NO_CHECK(shared_blk_geom, shared_geom_cnt);',
+                '    if (shared_blk_geom)',
+                '        svt_aom_build_blk_geom(shared_blk_geom_idx, shared_blk_geom);',
+                '    ONCE_ROUTINE_EPILOG;',
+                '}',
+                'DEFINE_ONCE(shared_blk_geom_once);',
+                '',
+                'static EbErrorType svt_shared_setup(SequenceControlSet *scs) {',
+                '    shared_cpu_flags = scs->static_config.use_cpu_flags;',
+                '    svt_run_once(&shared_rtcd_once, init_shared_rtcd);',
+                '    svt_run_once(&global_tables_once, init_global_tables);',
+                '    shared_geom_idx = scs->svt_aom_geom_idx;',
+                '    shared_geom_cnt = scs->max_block_cnt;',
+                '    svt_run_once(&shared_blk_geom_once, init_shared_blk_geom);',
+                '    if (shared_blk_geom && shared_blk_geom_idx == scs->svt_aom_geom_idx) {',
+                '        scs->blk_geom_mds = shared_blk_geom;',
+                '        return EB_ErrorNone;',
+                '    }',
+                '    EB_MALLOC_ARRAY(scs->blk_geom_mds, scs->max_block_cnt);',
+                '    svt_aom_build_blk_geom(scs->svt_aom_geom_idx, scs->blk_geom_mds);',
+                '    return EB_ErrorNone;',
+                '}'
+            )
+            for ($j = $sharedSetup.Length - 1; $j -ge 0; $j--) {
+                $lines.Insert($anchorIdx + 1, $sharedSetup[$j])
+            }
+        }
+    }
+
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $ln = $lines[$i]
+        if ($ln.Contains('handle->scs_instance->scs->blk_geom_mds != NULL) {')) {
+            $lines[$i] = $ln.Replace('handle->scs_instance->scs->blk_geom_mds != NULL) {', 'handle->scs_instance->scs->blk_geom_mds != NULL && handle->scs_instance->scs->blk_geom_mds != shared_blk_geom) {')
+        }
+        elseif ($ln -eq '        return_error = svt_av1_set_default_params(config_ptr);') {
+            $lines[$i] = '        return_error = config_ptr ? svt_av1_set_default_params(config_ptr) : EB_ErrorNone;'
+        }
+        elseif ($ln -eq '    if (scs->static_config.encoder_bit_depth == EB_EIGHT_BIT) {') {
+            $lines[$i] = '    if (0) {'
+        }
+        elseif ($ln -eq '    if (validate_on_the_fly_settings(p_buffer,scs, enc_handle_ptr->scs_instance->config_mutex)) {') {
+            $lines[$i] = '    if (0) {'
+        }
+        elseif ($ln -eq '    EbErrorType return_error = svt_av1_verify_settings(scs);') {
+            $lines[$i] = '    EbErrorType return_error = EB_ErrorNone;'
+        }
+        elseif ($ln -eq '            if (svt_aom_copy_metadata_buffer(dst, src->metadata) != EB_ErrorNone)') {
+            $lines[$i] = '            if (1)'
+        }
+    }
+    Set-Content -Path $encHandleFile -Value ([string]::Join("`n", $lines)) -NoNewline
+
+    $avx2Supported = $false
+    try { $avx2Supported = [System.Runtime.Intrinsics.X86.Avx2]::IsSupported } catch { }
+    if ($avx2Supported) {
+        $macrosFile = 'Source\API\EbConfigMacros.h'
+        $lines = New-Object System.Collections.Generic.List[string]
+        foreach ($l in ((Get-Content -Raw $macrosFile).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
+        $inBlock = $false
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $ln = $lines[$i]
+            if ($ln -eq '#ifndef CONFIG_X86_AVX2_IS_GUARANTEED') { $inBlock = $true; continue }
+            if ($inBlock -and $ln -eq '#endif') { $inBlock = $false; continue }
+            if ($inBlock -and $ln -eq '#define CONFIG_X86_AVX2_IS_GUARANTEED       0') {
+                $lines[$i] = '#define CONFIG_X86_AVX2_IS_GUARANTEED       1'
+            }
+        }
+        Set-Content -Path $macrosFile -Value ([string]::Join("`n", $lines)) -NoNewline
+    }
+
+    $rtcdFiles = @('Source\Lib\Codec\aom_dsp_rtcd.c', 'Source\Lib\Codec\common_dsp_rtcd.c')
+    foreach ($rtcdFile in $rtcdFiles) {
+        $lines = New-Object System.Collections.Generic.List[string]
+        foreach ($l in ((Get-Content -Raw $rtcdFile).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
+        $pat = '^        SET_FUNCTIONS_X86\(ptr, neon, neon_dotprod, neon_i8mm, sve, sve2\) *\\$'
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match $pat) {
+                $lines[$i] = '        SET_FUNCTIONS_X86(ptr, mmx, sse, sse2, sse3, ssse3, sse4_1, sse4_2, avx, avx2, avx512) \'
+            }
+        }
+        Set-Content -Path $rtcdFile -Value ([string]::Join("`n", $lines)) -NoNewline
+    }
+
+    $encInterFile = 'Source\Lib\Codec\enc_inter_prediction.c'
+    $content = Get-Content -Raw $encInterFile
+    $content = $content.Replace('void NOINLINE svt_aom_enc_make_inter_predictor(', 'void svt_aom_enc_make_inter_predictor(')
+    Set-Content -Path $encInterFile -Value $content -NoNewline
+}
+
 function Build-SvtAv1 {
     param([string]$Variant, [string]$Dir, [string]$Branch, [string]$Repo, [string]$ExtraCFlags, [string]$ArchFlags, [bool]$NoPrompt)
 
@@ -435,51 +604,21 @@ function Build-SvtAv1 {
     $svtAvx512Flag = if ($avx512Supported) { 'ON' } else { 'OFF' }
     Write-Host "[INFO] Detected AVX512 support: $avx512Supported. SVT-AV1 will be built with -DENABLE_AVX512=$svtAvx512Flag." -ForegroundColor Cyan
 
-    if (Test-Path $Dir) {
-
-        $existingRemote = git -C $Dir remote get-url origin 2>$null | Select-Object -First 1
-        if ($existingRemote -ne $Repo) {
-            Write-Host "[INFO] SVT fork changed from $existingRemote to $Repo. Re-cloning..." -ForegroundColor Cyan
-            Remove-Item -Recurse -Force $Dir
-            if ($Branch) {
-                git clone --depth 300 --branch $Branch $Repo $Dir
-            }
-            else {
-                git clone --depth 300 $Repo $Dir
-            }
-        }
-        else {
-            Push-Location $Dir
-            git pull
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "[WARNING] git pull failed. Forcing sync with remote..." -ForegroundColor Yellow
-                git fetch
-                git reset --hard '@{u}'
-            }
-            Pop-Location
-        }
+    if (Test-Path $Dir) { Remove-Item -Recurse -Force $Dir }
+    if ($Branch) {
+        # depth 300 to get the git tag
+        git clone --depth 300 --branch $Branch $Repo $Dir
     }
     else {
-        if ($Branch) {
-            # depth 300 to get the git tag
-            git clone --depth 300 --branch $Branch $Repo $Dir
-        }
-        else {
-            git clone --depth 300 $Repo $Dir
-        }
+        git clone --depth 300 $Repo $Dir
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to clone $Repo into $Dir." -ForegroundColor Red
+        exit 1
     }
     Push-Location $Dir
 
-    $svtThreadsFile = 'Source\Lib\Codec\svt_threads.c'
-    $content = Get-Content -Raw $svtThreadsFile
-    $content = $content.Replace('1 MiB', '8 MiB').Replace('const size_t min_stack_size = 1024 * 1024;', 'const size_t min_stack_size = 8 * 1024 * 1024;')
-    $content = $content.Replace('0, // default stack size', '8 * 1024 * 1024, // default stack size').Replace('0, // thread active when created', 'STACK_SIZE_PARAM_IS_A_RESERVATION, // thread active when created')
-    Set-Content -Path $svtThreadsFile -Value $content -NoNewline
-
-    $encInterFile = 'Source\Lib\Codec\enc_inter_prediction.c'
-    $content = Get-Content -Raw $encInterFile
-    $content = $content.Replace('void NOINLINE svt_aom_enc_make_inter_predictor(', 'void svt_aom_enc_make_inter_predictor(')
-    Set-Content -Path $encInterFile -Value $content -NoNewline
+    Patch-SvtAv1Sources -Variant $Variant
 
     $pgoDir = "$PWD/svt_pgo_data"
     if (Test-Path $pgoDir) { Remove-Item -Recurse -Force $pgoDir }
@@ -932,9 +1071,7 @@ function Build-Xav {
         '-Z', 'dylib-lto',
         '-Z', 'panic_abort_tests',
         '-C', 'link-arg=/OPT:REF',
-        '-C', 'link-arg=/OPT:ICF',
-        '-C', 'link-arg=/BASE:0x40000000',
-        '-C', 'link-arg=/FIXED'
+        '-C', 'link-arg=/OPT:ICF'
     ) -join ' '
 
     $features = "static"
@@ -1026,7 +1163,8 @@ Write-Host "  3. 5fish             (https://github.com/5fish/svt-av1-psy)"
 Write-Host "  4. svt-av1-tritium   (https://github.com/Uranite/svt-av1-tritium)"
 Write-Host "  5. svt-av1-tritium yis branch [testing only, do not use]   (https://github.com/Uranite/svt-av1-tritium/tree/yis)"
 Write-Host "  6. svt-av1-essential yiss fork [testing only, do not use]  (https://github.com/Uranite/SVT-AV1-Essential)"
-$svtChoice = Read-Host "Enter choice (1-6) [Default: 1]"
+Write-Host "  7. mainline           (https://gitlab.com/AOMediaCodec/SVT-AV1)"
+$svtChoice = Read-Host "Enter choice (1-7) [Default: 1]"
     if (-not $svtChoice) { $svtChoice = '1' }
 }
 
@@ -1037,6 +1175,7 @@ switch ($svtChoice) {
     '4' { $svtVariant = 'svt-av1-tritium'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
     '5' { $svtVariant = 'svt-av1-tritium-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = 'yis'; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
     '6' { $svtVariant = 'svt-av1-essential-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-essential.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
+    '7' { $svtVariant = 'mainline'; $svtRepo = 'https://gitlab.com/AOMediaCodec/SVT-AV1.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
     default {
         Write-Host "[ERROR] Invalid choice." -ForegroundColor Red
         exit 1
