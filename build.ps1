@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 [CmdletBinding()]
 param (
     [switch]$ForceRebuild,
@@ -76,18 +76,6 @@ function Update-SessionEnvironment {
         $val = [System.Environment]::GetEnvironmentVariable($var, 'Machine')
         if (-not $val) { $val = [System.Environment]::GetEnvironmentVariable($var, 'User') }
         if ($val) { Set-Item "env:$var" $val }
-    }
-}
-
-function Get-Avx512Supported {
-    # System.Runtime.Intrinsics is only available on .NET 5+ (PowerShell 7+).
-    # On PS 5.1 / .NET Framework the type won't exist, so we catch and return $false.
-    try {
-        return [System.Runtime.Intrinsics.X86.Avx512F]::IsSupported
-    }
-    catch {
-        Write-Host "[INFO] Could not detect AVX512 support (requires PowerShell 7+). Enabling anyway." -ForegroundColor Cyan
-        return $true
     }
 }
 
@@ -545,9 +533,7 @@ function Patch-SvtAv1Sources {
     }
     Set-Content -Path $encHandleFile -Value ([string]::Join("`n", $lines)) -NoNewline
 
-    $avx2Supported = $false
-    try { $avx2Supported = [System.Runtime.Intrinsics.X86.Avx2]::IsSupported } catch { }
-    if ($avx2Supported) {
+    if ([System.Runtime.Intrinsics.X86.Avx2]::IsSupported) {
         $macrosFile = 'Source\API\EbConfigMacros.h'
         $lines = New-Object System.Collections.Generic.List[string]
         foreach ($l in ((Get-Content -Raw $macrosFile).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
@@ -600,7 +586,7 @@ function Build-SvtAv1 {
         }
     }
 
-    $avx512Supported = Get-Avx512Supported
+    $avx512Supported = [System.Runtime.Intrinsics.X86.Avx512F]::IsSupported
     $svtAvx512Flag = if ($avx512Supported) { 'ON' } else { 'OFF' }
     Write-Host "[INFO] Detected AVX512 support: $avx512Supported. SVT-AV1 will be built with -DENABLE_AVX512=$svtAvx512Flag." -ForegroundColor Cyan
 
