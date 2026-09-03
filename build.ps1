@@ -1228,24 +1228,25 @@ function Build-Xav {
         '-C', 'link-arg=/OPT:ICF'
     ) -join ' '
 
-    $features = "static"
-    if ($enableAvm) { $features += ",avm" }
+    $features = @()
+    if ($enableAvm) { $features += "avm" }
     if ($enableTQ) {
-        $features += ",vship"
-        if ($Backend -eq 'cuda') { $features += ",nvidia,cuda" }
-        elseif ($Backend -eq 'hip') { $features += ",amd" }
+        $features += "vship"
+        if ($Backend -eq 'cuda') { $features += "cuda" }
+        elseif ($Backend -eq 'hip') { $features += "amd" }
     }
 
     if ($SvtChoice -eq '3') {
-        $features += ",5fish"
+        $features += "5fish"
     }
     elseif ($SvtChoice -eq '2' -or $SvtChoice -eq '6') {
-        $features += ",svt-essential"
+        $features += "svt-essential"
     }
 
+    $featureArg = $features -join ","
     Invoke-Step "Cargo build ($Backend)" {
         cargo update
-        cargo build --release --features $features --no-default-features
+        cargo build --release --no-default-features --features "$featureArg"
     }
 
     Write-Host ""
@@ -1311,8 +1312,8 @@ if ($NoPrompt) {
     $avmChoice = if ($EnableAvm) { 'Y' } else { 'N' }
 } else {
     Write-Host "[PROMPT] Compile with avm feature?" -ForegroundColor Yellow
-    $avmChoice = Read-Host "Enter choice (Y/N) [Default: N]"
-    if (-not $avmChoice) { $avmChoice = 'N' }
+    $avmChoice = Read-Host "Enter choice (Y/N) [Default: Y]"
+    if (-not $avmChoice) { $avmChoice = 'Y' }
 }
 
 $enableAvm = $avmChoice -ieq 'Y'
