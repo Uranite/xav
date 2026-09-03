@@ -576,15 +576,6 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
             println!("cargo:rustc-link-lib=static=cudart_static");
         }
 
-        #[cfg(feature = "vcpkg")]
-        {
-            vcpkg::Config::new()
-                .emit_includes(true)
-                .find_package("ffmpeg")
-                .expect("Failed to find ffmpeg via vcpkg");
-        }
-
-        #[cfg(not(feature = "vcpkg"))]
         {
             let mut ffmpeg_lib_path = PathBuf::from(&manifest_dir);
             ffmpeg_lib_path.push("ffmpeg");

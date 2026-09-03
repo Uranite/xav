@@ -20,12 +20,10 @@ svt-essential = []
 static = []
 nvidia = []
 amd = []
-vcpkg = []
 5fish = []
 
 [build-dependencies]
 nasm-rs = { version = "0.3.2", features = ["parallel"] }
-vcpkg = "0.2"
 
 [profile.release]
 opt-level = 3
