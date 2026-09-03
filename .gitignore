@@ -13,6 +13,7 @@ Cargo.lock
 /install
 /vulkan
 /nv-codec-headers
+/avm
 
 # Build
 /target

@@ -1,0 +1,247 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 3c9299d4e..32bbe0340 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -577,71 +577,151 @@ if(CONFIG_AV2_ENCODER)
+     # These are the paths of the stored TFLite dependencies, use the the
+     # fetchcontent snippet above, then look for messages like: "Performing
+     # download step (download, verify and extract) for 'xyz'" go to
+-    # "xyz-source", Then archive the source into "xyz.tar.gz" and and add the
++    # "xyz-source", Then archive the source into "xyz.tar.gz" and add the
+     # variable "XYZ_SOURCE_DIR" pointing to "third_party/xyz" like below, also
+-    # update the command line to extrac the archive below.
+-
+-    string(
+-      CONCAT
+-        EXTRACT_TF_UPDATE_DEPS_CMAKE_CONFIG
+-        "cd ${CMAKE_CURRENT_SOURCE_DIR}/third_party;"
+-        "tar -xzf tensorflow.tar.gz; "
+-        "cd tensorflow; "
+-        "patch -p1 < ../tensorflow-designated-initializers.patch; "
+-        "patch -p1 < ../tensorflow-elementwise.patch; "
+-        "cd ..; "
+-        "tar -xzf deps_cmake.tar.gz; "
+-        "cp deps_cmake/abseil-cpp.cmake ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tensorflow/tensorflow/lite/tools/cmake/modules; "
+-        "cp deps_cmake/cpuinfo.cmake ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tensorflow/tensorflow/lite/tools/cmake/modules; "
+-        "cp deps_cmake/eigen.cmake ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tensorflow/tensorflow/lite/tools/cmake/modules; "
+-        "cp deps_cmake/farmhash.cmake ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tensorflow/tensorflow/lite/tools/cmake/modules; "
+-        "cp deps_cmake/fft2d.cmake ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tensorflow/tensorflow/lite/tools/cmake/modules; "
+-        "cp deps_cmake/flatbuffers.cmake ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tensorflow/tensorflow/lite/tools/cmake/modules; "
+-        "cp deps_cmake/gemmlowp.cmake ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tensorflow/tensorflow/lite/tools/cmake/modules; "
+-        "cp deps_cmake/ml_dtypes.cmake ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tensorflow/tensorflow/lite/tools/cmake/modules; "
+-        "cp deps_cmake/neon2sse.cmake ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tensorflow/tensorflow/lite/tools/cmake/modules; "
+-        "cp deps_cmake/protobuf.cmake ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tensorflow/tensorflow/lite/tools/cmake/modules; "
+-        "cp deps_cmake/ruy.cmake ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tensorflow/tensorflow/lite/tools/cmake/modules; "
+-        "cp deps_cmake/xnnpack.cmake ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tensorflow/tensorflow/lite/tools/cmake/modules"
+-    )
++    # add the archive to the foreach dependency list below.
++
++    set(AVM_TFLITE_THIRD_PARTY_DIR "${AVM_ROOT}/third_party")
++    set(AVM_TF_SRC_DIR "${AVM_TFLITE_THIRD_PARTY_DIR}/tensorflow")
++    set(AVM_TF_MODULES_DIR
++        "${AVM_TF_SRC_DIR}/tensorflow/lite/tools/cmake/modules")
++
++    find_package(Git QUIET)
++    if(GIT_FOUND)
++      get_filename_component(_avm_git_bin "${GIT_EXECUTABLE}" DIRECTORY)
++    endif()
++    find_program(
++      AVM_PATCH_PROGRAM
++      NAMES patch
++      HINTS "${_avm_git_bin}" "${_avm_git_bin}/../usr/bin"
++      DOC "patch utility used to apply bundled TFLite fixes")
++    unset(_avm_git_bin)
++    if(NOT AVM_PATCH_PROGRAM)
++      message(
++        FATAL_ERROR
++          "Building TFLite requires the `patch` utility to apply the bundled patches (on Windows it ships with Git for Windows)."
++      )
++    endif()
+ 
+-    execute_process(COMMAND bash -c "${EXTRACT_TF_UPDATE_DEPS_CMAKE_CONFIG}")
+-    string(
+-      CONCAT EXTRACT_DEPS_TO_BUILD
+-             "cd ${CMAKE_CURRENT_SOURCE_DIR}/third_party; "
+-             "tar -xzf abseil-cpp.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf eigen.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             # https://github.com/intel/ARM_NEON_2_x86_SSE commit 662a859
+-             "tar -xzf neon2sse.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf xnnpack.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf ruy.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf farmhash.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf fft2d.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf gemmlowp.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf ml_dtypes.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf cpuinfo.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf protobuf.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf flatbuffers.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             # https://github.com/Maratyszcza/FP16 commit 3d2de18
+-             "tar -xzf fp16.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf pthreadpool.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf psimd.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf FXdiv.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf benchmark.tar.gz -C ${CMAKE_BINARY_DIR}; "
+-             "tar -xzf googletest.tar.gz -C ${CMAKE_BINARY_DIR}")
+-
+-    execute_process(COMMAND bash -c "${EXTRACT_DEPS_TO_BUILD}")
++    function(avm_apply_p1_patch TARGET_DIR PATCH_FILE STAMP_FILE)
++      if(EXISTS "${STAMP_FILE}"
++         AND NOT "${PATCH_FILE}" IS_NEWER_THAN "${STAMP_FILE}")
++        return()
++      endif()
++      get_filename_component(_avm_patch_name "${PATCH_FILE}" NAME)
++      set(_avm_patch_copy "${CMAKE_BINARY_DIR}/avm_patches/${_avm_patch_name}")
++      file(READ "${PATCH_FILE}" _avm_patch_text)
++      string(REPLACE "\r\n" "\n" _avm_patch_text "${_avm_patch_text}")
++      file(WRITE "${_avm_patch_copy}" "${_avm_patch_text}")
++      execute_process(
++        COMMAND "${AVM_PATCH_PROGRAM}" -p1 -N --forward -i "${_avm_patch_copy}"
++        WORKING_DIRECTORY "${TARGET_DIR}"
++        RESULT_VARIABLE _avm_patch_result
++        OUTPUT_VARIABLE _avm_patch_out
++        ERROR_VARIABLE _avm_patch_err)
++      if(NOT _avm_patch_result EQUAL 0)
++        file(REMOVE "${STAMP_FILE}")
++        message(
++          FATAL_ERROR
++            "Failed to apply ${PATCH_FILE} in ${TARGET_DIR}:\n${_avm_patch_err}\n${_avm_patch_out}"
++        )
++      endif()
++      file(WRITE "${STAMP_FILE}" "patched by avm build\n")
++    endfunction()
++
++    function(avm_extract_tarball ARCHIVE PARENT_DIR DEST_DIR READY_MARKER)
++      if(NOT EXISTS "${ARCHIVE}")
++        message(FATAL_ERROR "Missing TFLite dependency archive: ${ARCHIVE}")
++      endif()
++      if(EXISTS "${READY_MARKER}"
++         AND EXISTS "${DEST_DIR}"
++         AND NOT "${ARCHIVE}" IS_NEWER_THAN "${READY_MARKER}")
++        return()
++      endif()
++      message(STATUS "Extracting ${ARCHIVE} ...")
++      file(REMOVE_RECURSE "${DEST_DIR}")
++      file(MAKE_DIRECTORY "${PARENT_DIR}")
++      execute_process(
++        COMMAND "${CMAKE_COMMAND}" -E tar xzf "${ARCHIVE}"
++        WORKING_DIRECTORY "${PARENT_DIR}"
++        RESULT_VARIABLE _avm_tar_result
++        OUTPUT_VARIABLE _avm_tar_out
++        ERROR_VARIABLE _avm_tar_err)
++      if(NOT _avm_tar_result EQUAL 0)
++        file(REMOVE_RECURSE "${DEST_DIR}")
++        file(REMOVE "${READY_MARKER}")
++        message(
++          FATAL_ERROR "Failed to extract ${ARCHIVE}:\n${_avm_tar_err}\n${_avm_tar_out}"
++        )
++      endif()
++      if(NOT EXISTS "${DEST_DIR}")
++        file(REMOVE "${READY_MARKER}")
++        message(
++          FATAL_ERROR
++            "Failed to extract ${ARCHIVE}: expected directory ${DEST_DIR} was not created."
++        )
++      endif()
++      file(WRITE "${READY_MARKER}" "extracted by avm build\n")
++    endfunction()
++
++    avm_extract_tarball(
++      "${AVM_TFLITE_THIRD_PARTY_DIR}/tensorflow.tar.gz"
++      "${AVM_TFLITE_THIRD_PARTY_DIR}" "${AVM_TF_SRC_DIR}"
++      "${AVM_TF_SRC_DIR}/.avm_extract.stamp")
++    avm_apply_p1_patch(
++      "${AVM_TF_SRC_DIR}"
++      "${AVM_TFLITE_THIRD_PARTY_DIR}/tensorflow-designated-initializers.patch"
++      "${AVM_TF_SRC_DIR}/.avm_designated_initializers.stamp")
++    avm_apply_p1_patch(
++      "${AVM_TF_SRC_DIR}"
++      "${AVM_TFLITE_THIRD_PARTY_DIR}/tensorflow-elementwise.patch"
++      "${AVM_TF_SRC_DIR}/.avm_elementwise.stamp")
++
++    avm_extract_tarball(
++      "${AVM_TFLITE_THIRD_PARTY_DIR}/deps_cmake.tar.gz"
++      "${AVM_TFLITE_THIRD_PARTY_DIR}"
++      "${AVM_TFLITE_THIRD_PARTY_DIR}/deps_cmake"
++      "${AVM_TFLITE_THIRD_PARTY_DIR}/deps_cmake/.avm_extract.stamp")
++    file(COPY "${AVM_TFLITE_THIRD_PARTY_DIR}/deps_cmake/"
++         DESTINATION "${AVM_TF_MODULES_DIR}")
++
++    foreach(
++      _avm_dep
++      abseil-cpp
++      eigen
++      neon2sse
++      xnnpack
++      ruy
++      farmhash
++      fft2d
++      gemmlowp
++      ml_dtypes
++      cpuinfo
++      protobuf
++      flatbuffers
++      fp16
++      pthreadpool
++      psimd
++      FXdiv
++      benchmark
++      googletest)
++      if(_avm_dep STREQUAL "xnnpack")
++        set(_avm_dest "XNNPACK")
++      else()
++        set(_avm_dest "${_avm_dep}")
++      endif()
++      avm_extract_tarball(
++        "${AVM_TFLITE_THIRD_PARTY_DIR}/${_avm_dep}.tar.gz" "${CMAKE_BINARY_DIR}"
++        "${CMAKE_BINARY_DIR}/${_avm_dest}"
++        "${CMAKE_BINARY_DIR}/${_avm_dest}/.avm_extract.stamp")
++    endforeach()
+ 
+     # Patch in this commit.
+     # https://github.com/abseil/abseil-cpp/commit/809e5de7b92950849289236a5a09e9cb4f32c7b9
+-    string(
+-      CONCAT
+-        APPLY_PATCH_ABSEIL_CPP
+-        "cd ${CMAKE_BINARY_DIR}/abseil-cpp;"
+-        "patch -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/third_party/abseil-cpp-add-include.patch; "
+-    )
+-
+-    execute_process(COMMAND bash -c "${APPLY_PATCH_ABSEIL_CPP}")
++    avm_apply_p1_patch(
++      "${CMAKE_BINARY_DIR}/abseil-cpp"
++      "${AVM_TFLITE_THIRD_PARTY_DIR}/abseil-cpp-add-include.patch"
++      "${CMAKE_BINARY_DIR}/abseil-cpp/.avm_add_include.stamp")
+ 
+     set(FP16_SOURCE_DIR ${CMAKE_BINARY_DIR}/fp16)
+     set(PTHREADPOOL_SOURCE_DIR ${CMAKE_BINARY_DIR}/pthreadpool)
+@@ -678,8 +758,13 @@ if(CONFIG_AV2_ENCODER)
+     add_subdirectory(third_party/tensorflow/tensorflow/lite/c)
+     set(CMAKE_MESSAGE_LOG_LEVEL ${OLD_CMAKE_MESSAGE_LOG_LEVEL})
+ 
+-    # Disable some noisy warnings in tflite
+-    target_compile_options(tensorflow-lite PRIVATE -w)
++    if(MSVC)
++      set(AVM_TFLITE_SUPPRESS_WARNING_FLAG /w)
++    else()
++      set(AVM_TFLITE_SUPPRESS_WARNING_FLAG -w)
++    endif()
++    target_compile_options(tensorflow-lite
++                           PRIVATE ${AVM_TFLITE_SUPPRESS_WARNING_FLAG})
+     include_directories(${AVM_ROOT}/third_party/tensorflow)
+     include_directories("${CMAKE_CURRENT_BINARY_DIR}/flatbuffers/include/")
+     add_dependencies(avm_av2_common tensorflow-lite)
+@@ -708,10 +793,12 @@ if(CONFIG_AV2_ENCODER)
+       foreach(DEP_TARGET ${DEP_TARGETS})
+         get_target_property(DEP_TYPE ${DEP_TARGET} TYPE)
+         if(${DEP_TYPE} STREQUAL "INTERFACE_LIBRARY")
+-          target_compile_options(${DEP_TARGET} INTERFACE -w)
++          target_compile_options(${DEP_TARGET}
++                                 INTERFACE ${AVM_TFLITE_SUPPRESS_WARNING_FLAG})
+         elseif(NOT (${DEP_TYPE} STREQUAL "UTILITY"))
+           # There is a custom UTILITY type, so do not deal with it.
+-          target_compile_options(${DEP_TARGET} PUBLIC -w)
++          target_compile_options(${DEP_TARGET}
++                                 PUBLIC ${AVM_TFLITE_SUPPRESS_WARNING_FLAG})
+         endif()
+       endforeach()
+     endforeach()
