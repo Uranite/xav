@@ -522,98 +522,81 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     build_asm()?;
 
-    if !cfg!(feature = "static") {
-        println!("cargo:rustc-link-lib=opus");
-        #[cfg(feature = "vship")]
-        println!("cargo:rustc-link-lib=libvship");
-        println!("cargo:rustc-link-lib=SvtAv1Enc");
-        #[cfg(not(feature = "cuda"))]
-        println!("cargo:rustc-link-lib=vulkan-1");
-    } else {
-        let mut lib_path = PathBuf::from(&manifest_dir);
-        lib_path.push("lib");
-        println!("cargo:rustc-link-search=native={}", lib_path.display());
-        println!("cargo:rustc-link-lib=static=opus");
-        println!("cargo:rustc-link-lib=static=SvtAv1Enc");
-        #[cfg(feature = "avm")]
-        println!("cargo:rustc-link-lib=static=avm_full");
-        #[cfg(not(feature = "cuda"))]
-        println!("cargo:rustc-link-lib=vulkan-1");
+    let mut lib_path = PathBuf::from(&manifest_dir);
+    lib_path.push("lib");
+    println!("cargo:rustc-link-search=native={}", lib_path.display());
+    println!("cargo:rustc-link-lib=static=opus");
+    println!("cargo:rustc-link-lib=static=SvtAv1Enc");
+    #[cfg(feature = "avm")]
+    println!("cargo:rustc-link-lib=static=avm_full");
+    #[cfg(not(feature = "cuda"))]
+    println!("cargo:rustc-link-lib=vulkan-1");
 
-        #[cfg(feature = "vship")]
-        {
-            if !cfg!(feature = "amd") && !cfg!(feature = "nvidia") {
-                println!(
-                    "cargo:warning=The 'vship' feature is enabled, but neither 'amd' nor 'nvidia' \
-                     is selected. Please enable one, e.g., --features vship,amd (ignore if you're \
-                     compiling with vulkan vship)"
-                );
+    #[cfg(feature = "vship")]
+    {
+        println!("cargo:rustc-link-lib=static=libvship");
+
+        #[cfg(feature = "amd")]
+        match env::var("HIP_PATH") {
+            Ok(hip_path) => {
+                let hip_lib_path = std::path::Path::new(&hip_path).join("lib");
+                println!("cargo:rustc-link-search=native={}", hip_lib_path.display());
             }
-
-            println!("cargo:rustc-link-lib=static=libvship");
-
-            #[cfg(feature = "amd")]
-            match env::var("HIP_PATH") {
-                Ok(hip_path) => {
-                    let hip_lib_path = std::path::Path::new(&hip_path).join("lib");
-                    println!("cargo:rustc-link-search=native={}", hip_lib_path.display());
-                }
-                Err(_) => {
-                    println!("cargo:warning=HIP_PATH environment variable not set.");
-                }
-            }
-            #[cfg(feature = "amd")]
-            println!("cargo:rustc-link-lib=static=amdhip64");
-            #[cfg(feature = "nvidia")]
-            match env::var("CUDA_PATH") {
-                Ok(cuda_path) => {
-                    let cuda_lib_path = std::path::Path::new(&cuda_path).join("lib").join("x64");
-                    println!("cargo:rustc-link-search=native={}", cuda_lib_path.display());
-                }
-                Err(_) => {
-                    println!("cargo:warning=CUDA_PATH environment variable not set.");
-                }
-            }
-            #[cfg(feature = "nvidia")]
-            println!("cargo:rustc-link-lib=static=cudart_static");
-        }
-
-        {
-            let mut ffmpeg_lib_path = PathBuf::from(&manifest_dir);
-            ffmpeg_lib_path.push("ffmpeg");
-            ffmpeg_lib_path.push("lib");
-            println!(
-                "cargo:rustc-link-search=native={}",
-                ffmpeg_lib_path.display()
-            );
-
-            let libs = [
-                "swresample",
-                "avformat",
-                "avcodec",
-                "avutil",
-                "dav1d",
-                // "lzma",
-                // "libssl",
-                // "libcrypto",
-                // "iconv",
-                // "libxml2",
-                // "bz2",
-            ];
-            for lib in libs {
-                println!("cargo:rustc-link-lib=static={}", lib);
+            Err(_) => {
+                println!("cargo:warning=HIP_PATH environment variable not set.");
             }
         }
-        println!("cargo:rustc-link-lib=bcrypt");
-        // non-minimal ffmpeg and static vulkan
-        // let sys_libs = [
-        //     "bcrypt", "mfuuid", "strmiids", "advapi32", "crypt32", "user32", "ole32",
-        //     "cfgmgr32", "setupapi", "gdi32", "shlwapi",
-        // ];
-        // for lib in sys_libs {
-        //     println!("cargo:rustc-link-lib={}", lib);
-        // }
+        #[cfg(feature = "amd")]
+        println!("cargo:rustc-link-lib=static=amdhip64");
+        #[cfg(feature = "cuda")]
+        match env::var("CUDA_PATH") {
+            Ok(cuda_path) => {
+                let cuda_lib_path = std::path::Path::new(&cuda_path).join("lib").join("x64");
+                println!("cargo:rustc-link-search=native={}", cuda_lib_path.display());
+            }
+            Err(_) => {
+                println!("cargo:warning=CUDA_PATH environment variable not set.");
+            }
+        }
+        #[cfg(feature = "cuda")]
+        println!("cargo:rustc-link-lib=static=cudart_static");
     }
+
+    {
+        let mut ffmpeg_lib_path = PathBuf::from(&manifest_dir);
+        ffmpeg_lib_path.push("ffmpeg");
+        ffmpeg_lib_path.push("lib");
+        println!(
+            "cargo:rustc-link-search=native={}",
+            ffmpeg_lib_path.display()
+        );
+
+        let libs = [
+            "swresample",
+            "avformat",
+            "avcodec",
+            "avutil",
+            "dav1d",
+            // "lzma",
+            // "libssl",
+            // "libcrypto",
+            // "iconv",
+            // "libxml2",
+            // "bz2",
+        ];
+        for lib in libs {
+            println!("cargo:rustc-link-lib=static={}", lib);
+        }
+    }
+    println!("cargo:rustc-link-lib=bcrypt");
+    // non-minimal ffmpeg and static vulkan
+    // let sys_libs = [
+    //     "bcrypt", "mfuuid", "strmiids", "advapi32", "crypt32", "user32", "ole32",
+    //     "cfgmgr32", "setupapi", "gdi32", "shlwapi",
+    // ];
+    // for lib in sys_libs {
+    //     println!("cargo:rustc-link-lib={}", lib);
+    // }
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         // Our asm indexes rodata tables as [table + reg*scale] amd64
         // cant encode rip-relative; nasm emits a 32-bit absolute

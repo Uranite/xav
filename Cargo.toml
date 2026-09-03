@@ -12,13 +12,12 @@ keywords = ["av1", "av2", "vvc", "cvvdp", "video", "multimedia", "encoding", "qu
 categories = ["multimedia::video", "command-line-utilities"]
 
 [features]
+default = [ "vship","cuda","avm" ]
 vship = []
 cuda = []
 avm = []
 vvenc = []
 svt-essential = []
-static = []
-nvidia = []
 amd = []
 5fish = []
 
