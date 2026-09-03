@@ -535,6 +535,8 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
         println!("cargo:rustc-link-search=native={}", lib_path.display());
         println!("cargo:rustc-link-lib=static=opus");
         println!("cargo:rustc-link-lib=static=SvtAv1Enc");
+        #[cfg(feature = "avm")]
+        println!("cargo:rustc-link-lib=static=avm_full");
         #[cfg(not(feature = "cuda"))]
         println!("cargo:rustc-link-lib=vulkan-1");
 

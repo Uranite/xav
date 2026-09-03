@@ -3,6 +3,7 @@
 param (
     [switch]$ForceRebuild,
     [switch]$EnableTQ,
+    [switch]$EnableAvm,
     [string]$Backend = "cuda",
     [int]$SvtVariantId = 1,
     [int]$ArchChoiceId = 1,
@@ -1042,8 +1043,175 @@ make -j$(nproc)
     }
 }
 
+function Patch-AvmSources {
+    $file = 'av2/encoder/part_split_prune_tflite.cc'
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
+    $idx = $lines.IndexOf('static void ensure_tflite_init(void **context, MODEL_TYPE model_type) {')
+    if ($idx -ge 0) { $lines.Insert($idx, 'static thread_local PartSplitContext *tls_part_split;') }
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -eq '  if (*context == nullptr) *context = new PartSplitContext();') {
+            $lines[$i] = "  if (*context == nullptr) {`n    if (tls_part_split == nullptr) tls_part_split = new PartSplitContext();`n    *context = tls_part_split;`n  }"
+            break
+        }
+    }
+    $closeIdx = $lines.IndexOf('extern "C" void av2_part_prune_tflite_close(void **context) {')
+    if ($closeIdx -ge 0) {
+        $endIdx = -1
+        for ($i = $closeIdx + 1; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -eq '}') { $endIdx = $i; break }
+        }
+        if ($endIdx -ge 0) {
+            $lines.RemoveRange($closeIdx, $endIdx - $closeIdx + 1)
+            $lines.Insert($closeIdx, 'extern "C" void av2_part_prune_tflite_close(void **context) { *context = nullptr; }')
+        }
+    }
+    Set-Content -Path $file -Value ([string]::Join("`n", $lines)) -NoNewline
+
+    $file = 'av2/encoder/intra_dip_mode_prune_tflite.cc'
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
+    $idx = $lines.IndexOf('static void ensure_tflite_init(void **context, int model_index) {')
+    if ($idx -ge 0) { $lines.Insert($idx, 'static thread_local DipContext *tls_dip;') }
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -eq '    *context = new DipContext();') {
+            $lines[$i] = "    if (tls_dip == nullptr) tls_dip = new DipContext();`n    *context = tls_dip;"
+            break
+        }
+    }
+    $closeIdx = $lines.IndexOf('extern "C" void intra_dip_mode_prune_close(void **context) {')
+    if ($closeIdx -ge 0) {
+        $endIdx = -1
+        for ($i = $closeIdx + 1; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -eq '}') { $endIdx = $i; break }
+        }
+        if ($endIdx -ge 0) {
+            $lines.RemoveRange($closeIdx, $endIdx - $closeIdx + 1)
+            $lines.Insert($closeIdx, 'extern "C" void intra_dip_mode_prune_close(void **context) { *context = nullptr; }')
+        }
+    }
+    Set-Content -Path $file -Value ([string]::Join("`n", $lines)) -NoNewline
+
+    $file = 'avm_scale/avm_scale.cmake'
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
+    $kept = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $lines) {
+        if ($l.Contains('generic/avm_scale.c"') -or $l.Contains('generic/gen_scalers.c"')) { continue }
+        $kept.Add($l)
+    }
+    Set-Content -Path $file -Value ([string]::Join("`n", $kept)) -NoNewline
+
+    $file = 'avm/src/avm_encoder.c'
+    $content = Get-Content -Raw $file
+    $content = $content.Replace('#if ARCH_X86 || ARCH_X86_64', '#if 0')
+    $content = $content.Replace('if (!ctx || (img && !duration))', 'if (0)')
+    $content = $content.Replace('if (!ctx->iface || !ctx->priv)', 'if (0)')
+    $content = $content.Replace('if (!(ctx->iface->caps & AVM_CODEC_CAP_ENCODER))', 'if (0)')
+    $content = $content.Replace('if (!iter)', 'if (0)')
+    Set-Content -Path $file -Value $content -NoNewline
+
+    $file = 'av2/av2_cx_iface.c'
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^ +const avm_image_t \*img\) \{$') { $lines[$i] = $lines[$i] + ' return AVM_CODEC_OK;' }
+        elseif ($lines[$i] -match '^ +const struct av2_extracfg \*extra_cfg\) \{$') { $lines[$i] = $lines[$i] + ' return AVM_CODEC_OK;' }
+    }
+    $startIdx = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].StartsWith('static avm_codec_err_t encoder_encode(')) { $startIdx = $i; break }
+    }
+    if ($startIdx -ge 0) {
+        for ($i = $startIdx + 1; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -eq '    if (res == AVM_CODEC_OK) {') {
+                $lines[$i] = '    if (ctx->cx_data == NULL) {'
+                break
+            }
+        }
+    }
+    Set-Content -Path $file -Value ([string]::Join("`n", $lines)) -NoNewline
+}
+
+function Build-Avm {
+    param([bool]$NoPrompt)
+    if (Test-Path 'lib\avm_full.lib') {
+        if ($NoPrompt) {
+            $choice = if ($ForceRebuild) { 'Y' } else { 'N' }
+        }
+        else {
+            Write-Host ""
+            Write-Host "[PROMPT] avm is already compiled." -ForegroundColor Yellow
+            $choice = Read-Host "Do you want to update and recompile avm? (Y/N) [Default: N]"
+        }
+        if ($choice -notmatch '^[Yy]') {
+            Write-Host "[INFO] Skipping avm compilation..." -ForegroundColor Cyan
+            return
+        }
+    }
+    if (Test-Path 'avm') {
+        Push-Location avm
+        git reset --hard
+        git pull
+        Pop-Location
+    }
+    else { git clone --depth 1 https://github.com/AOMediaCodec/avm }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to clone https://github.com/AOMediaCodec/avm into avm." -ForegroundColor Red
+        exit 1
+    }
+    Push-Location avm
+    Invoke-Step "Patching AVM TFLite CMakeLists" { git apply "..\patch\tflite-windows-cmakelists.patch" }
+    Patch-AvmSources
+    if (Test-Path build) { Remove-Item -Recurse -Force build }
+    $cmakeArgs = @('-B', 'build', '-G', 'Ninja',
+        '-DCMAKE_BUILD_TYPE=Release',
+        '-DCMAKE_C_COMPILER=clang-cl',
+        '-DCMAKE_CXX_COMPILER=clang-cl',
+        '-DCMAKE_C_FLAGS=-flto /clang:-O3 -DNDEBUG -march=native',
+        '-DCMAKE_CXX_FLAGS=-flto /clang:-O3 -DNDEBUG -march=native /EHsc',
+        '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
+        '-DBUILD_SHARED_LIBS=OFF',
+        '-DENABLE_APPS=0',
+        '-DENABLE_EXAMPLES=0',
+        '-DENABLE_TESTS=0',
+        '-DENABLE_TOOLS=0',
+        '-DENABLE_DOCS=0',
+        '-DENABLE_NASM=1',
+        '-DCONFIG_AV2_ENCODER=1',
+        '-DCONFIG_AV2_DECODER=0',
+        '-DCONFIG_WEBM_IO=0',
+        '-DCONFIG_RUNTIME_CPU_DETECT=0',
+        '-DCONFIG_MULTITHREAD=0',
+        '-DCONFIG_LIBYUV=0',
+        '-DCONFIG_LANCZOS_RESAMPLE=0',
+        '-DCONFIG_SPATIAL_RESAMPLING=0',
+        '-DCONFIG_12BIT_PROFILE=0',
+        '-DCONFIG_DENOISE=0',
+        '-DCONFIG_TENSORFLOW_LITE=1')
+    Invoke-Step "Configuring AVM" { cmake @cmakeArgs }
+    $liteCmake = 'third_party/tensorflow/tensorflow/lite/CMakeLists.txt'
+    $liteContent = (Get-Content -Raw $liteCmake).Replace("`r`n", "`n")
+    $liteContent = $liteContent.Replace('FILTER "(.*_test_util_internal|test_.*|.*_ops_wrapper)\\.(cc|h)"', 'FILTER "(/[^/]*_test_util_internal[^/]*|/test_[^/]*|/[^/]*_ops_wrapper)\\.(cc|h)$"')
+    Set-Content -Path $liteCmake -Value $liteContent -NoNewline
+    Invoke-Step "Reconfiguring AVM" { cmake @cmakeArgs }
+    Invoke-Step "Building AVM" { ninja -C build avm }
+    if (-not (Test-Path 'build\avm.lib')) {
+        Write-Host "[ERROR] build\avm.lib not found after AVM build." -ForegroundColor Red
+        exit 1
+    }
+    $depLibs = @(Get-ChildItem -Path 'build' -Filter '*.lib' -Recurse -File | Where-Object { $_.Name -ne 'avm.lib' -and $_.Name -ne 'avm_full.lib' })
+    $libArgs = New-Object System.Collections.Generic.List[string]
+    $libArgs.Add('/OUT:build\avm_full.lib')
+    $libArgs.Add('build\avm.lib')
+    foreach ($d in $depLibs) { $libArgs.Add($d.FullName) }
+    Invoke-Step "Archiving AVM" { llvm-lib @libArgs }
+    Pop-Location
+    Copy-Item 'avm\build\avm_full.lib' 'lib\avm_full.lib' -Force
+}
+
 function Build-Xav {
-    param([string]$Backend, [string]$SvtChoice, [bool]$enableTQ)
+    param([string]$Backend, [string]$SvtChoice, [bool]$enableTQ, [bool]$enableAvm)
     $env:RUSTFLAGS = @(
         '-C', 'debuginfo=0',
         '-C', 'target-cpu=native',
@@ -1061,6 +1229,7 @@ function Build-Xav {
     ) -join ' '
 
     $features = "static"
+    if ($enableAvm) { $features += ",avm" }
     if ($enableTQ) {
         $features += ",vship"
         if ($Backend -eq 'cuda') { $features += ",nvidia,cuda" }
@@ -1104,7 +1273,7 @@ if (Test-Path 'lib') {
 if ($NoPrompt) {
     $tqChoice = if ($EnableTQ) { 'Y' } else { 'N' }
 } else {
-    Write-Host "Compile with target quality feature?"
+    Write-Host "[PROMPT] Compile with target quality feature?" -ForegroundColor Yellow
     $tqChoice = Read-Host "Enter choice (Y/N) [Default: Y]"
     if (-not $tqChoice) { $tqChoice = 'Y' }
 }
@@ -1116,7 +1285,7 @@ if ($enableTQ) {
         $vshipBackend = $Backend.ToLower()
     } else {
         Write-Host ""
-        Write-Host "Select Vship backend to compile:"
+        Write-Host "[PROMPT] Select Vship backend to compile:" -ForegroundColor Yellow
         Write-Host "  1. CUDA"
         Write-Host "  2. HIP"
         Write-Host "  3. Vulkan"
@@ -1139,10 +1308,20 @@ else {
 }
 
 if ($NoPrompt) {
+    $avmChoice = if ($EnableAvm) { 'Y' } else { 'N' }
+} else {
+    Write-Host "[PROMPT] Compile with avm feature?" -ForegroundColor Yellow
+    $avmChoice = Read-Host "Enter choice (Y/N) [Default: N]"
+    if (-not $avmChoice) { $avmChoice = 'N' }
+}
+
+$enableAvm = $avmChoice -ieq 'Y'
+
+if ($NoPrompt) {
     $svtChoice = $SvtVariantId.ToString()
 } else {
     Write-Host ""
-    Write-Host "Select SVT-AV1 variant to compile:"
+    Write-Host "[PROMPT] Select SVT-AV1 variant to compile:" -ForegroundColor Yellow
 Write-Host "  1. svt-av1-hdr       (https://github.com/juliobbv-p/svt-av1-hdr)"
 Write-Host "  2. svt-av1-essential (https://github.com/nekotrix/SVT-AV1-Essential)"
 Write-Host "  3. 5fish             (https://github.com/5fish/svt-av1-psy)"
@@ -1172,7 +1351,7 @@ if ($NoPrompt) {
     $archChoice = $ArchChoiceId.ToString()
 } else {
     Write-Host ""
-    Write-Host "Select target architecture for SVT-AV1:"
+    Write-Host "[PROMPT] Select target architecture for SVT-AV1:" -ForegroundColor Yellow
 Write-Host "  1. znver2                   (-march=znver2)"
 Write-Host "  2. icelake-server + znver5  (-march=icelake-server -mtune=znver5 -mprefer-vector-width=512)"
 Write-Host "  3. native                   (-march=native)"
@@ -1267,7 +1446,10 @@ if ($vshipBackend -eq 'cuda') {
     Build-NvHeaders -MsysExe $msysExe
 }
 Build-FFmpeg -VsPath $vsPath -MsysExe $msysExe -Backend $vshipBackend
+if ($enableAvm) {
+    Build-Avm -NoPrompt $NoPrompt
+}
 Build-SvtAv1 -Variant $svtVariant -Dir $svtDir -Branch $svtBranch -Repo $svtRepo -ExtraCFlags $svtExtraCFlags -ArchFlags $svtArchFlags -NoPrompt $NoPrompt
-Build-Xav -Backend $vshipBackend -SvtChoice $svtChoice -enableTQ $enableTQ
+Build-Xav -Backend $vshipBackend -SvtChoice $svtChoice -enableTQ $enableTQ -enableAvm $enableAvm
 
 Write-Host "[SUCCESS] Build script finished." -ForegroundColor Green
