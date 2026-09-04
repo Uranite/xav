@@ -410,174 +410,106 @@ function Build-Vship {
 }
 
 function Patch-SvtAv1Sources {
-    param([string]$Variant)
+    param([string]$Variant, [string]$MsysExe)
 
     # should be fixed in mainline/tritium
     $apply8MbStackPatch = $Variant -notin @('svt-av1-tritium', 'svt-av1-tritium-yis', 'mainline')
 
-    $cmakeFile = 'CMakeLists.txt'
-    $content = (Get-Content -Raw $cmakeFile).Replace("`r`n", "`n")
-    $content = $content.Replace('set(CMAKE_POSITION_INDEPENDENT_CODE ON)', 'set(CMAKE_POSITION_INDEPENDENT_CODE OFF)')
-    $content = $content.Replace('set(CMAKE_C_STANDARD 99)', 'set(CMAKE_C_STANDARD 23)')
-    $content = $content.Replace('set(CMAKE_CXX_STANDARD 11)', 'set(CMAKE_CXX_STANDARD 23)')
-    $commentOutPats = @('relro', 'mno-avx', 'fstack-protector-strong', 'FORTIFY_SOURCE', 'gdwarf', 'gnull')
-    $lines = $content.Split("`n")
-    for ($i = 0; $i -lt $lines.Length; $i++) {
-        foreach ($pat in $commentOutPats) {
-            if ($lines[$i].Contains($pat)) { $lines[$i] = '#' + $lines[$i]; break }
-        }
-    }
-    $content = [string]::Join("`n", $lines)
-    Set-Content -Path $cmakeFile -Value $content -NoNewline
+    $patchScript = @'
+#!/bin/sh
+set -e
+sed -i 's/\r//g' CMakeLists.txt Source/Lib/Globals/enc_handle.c Source/Lib/Codec/aom_dsp_rtcd.c Source/Lib/Codec/common_dsp_rtcd.c Source/Lib/Codec/enc_inter_prediction.c
+sed -i 's/set(CMAKE_POSITION_INDEPENDENT_CODE ON)/set(CMAKE_POSITION_INDEPENDENT_CODE OFF)/' CMakeLists.txt
+sed -i 's/set(CMAKE_C_STANDARD 99)/set(CMAKE_C_STANDARD 23)/' CMakeLists.txt
+sed -i 's/set(CMAKE_CXX_STANDARD 11)/set(CMAKE_CXX_STANDARD 23)/' CMakeLists.txt
+sed -i '/relro/s/^/#/' CMakeLists.txt
+sed -i '/mno-avx/s/^/#/' CMakeLists.txt
+sed -i '/fstack-protector-strong/s/^/#/' CMakeLists.txt
+sed -i '/FORTIFY_SOURCE/s/^/#/' CMakeLists.txt
+sed -i '/gdwarf/s/^/#/' CMakeLists.txt
+sed -i '/gnull/s/^/#/' CMakeLists.txt
+sed -i '/^    svt_aom_setup_common_rtcd_internal(scs->static_config.use_cpu_flags);$/,/^    svt_aom_build_blk_geom(scs->svt_aom_geom_idx, scs->blk_geom_mds);$/c\
+    return_error = svt_shared_setup(scs);\
+    if (return_error != EB_ErrorNone)\
+        return return_error;' Source/Lib/Globals/enc_handle.c
+grep -q init_shared_rtcd Source/Lib/Globals/enc_handle.c || sed -i '/^DEFINE_ONCE(global_tables_once);$/a\
+\
+static uint64_t          shared_cpu_flags;\
+static uint32_t          shared_geom_idx;\
+static uint16_t          shared_geom_cnt;\
+static struct BlockGeom *shared_blk_geom;\
+static uint32_t          shared_blk_geom_idx;\
+\
+static ONCE_ROUTINE(init_shared_rtcd) {\
+    svt_aom_setup_common_rtcd_internal(shared_cpu_flags);\
+    svt_aom_setup_rtcd_internal(shared_cpu_flags);\
+    ONCE_ROUTINE_EPILOG;\
+}\
+DEFINE_ONCE(shared_rtcd_once);\
+\
+static ONCE_ROUTINE(init_shared_blk_geom) {\
+    shared_blk_geom_idx = shared_geom_idx;\
+    EB_MALLOC_ARRAY_NO_CHECK(shared_blk_geom, shared_geom_cnt);\
+    if (shared_blk_geom)\
+        svt_aom_build_blk_geom(shared_blk_geom_idx, shared_blk_geom);\
+    ONCE_ROUTINE_EPILOG;\
+}\
+DEFINE_ONCE(shared_blk_geom_once);\
+\
+static EbErrorType svt_shared_setup(SequenceControlSet *scs) {\
+    shared_cpu_flags = scs->static_config.use_cpu_flags;\
+    svt_run_once(\&shared_rtcd_once, init_shared_rtcd);\
+    svt_run_once(\&global_tables_once, init_global_tables);\
+    shared_geom_idx = scs->svt_aom_geom_idx;\
+    shared_geom_cnt = scs->max_block_cnt;\
+    svt_run_once(\&shared_blk_geom_once, init_shared_blk_geom);\
+    if (shared_blk_geom \&\& shared_blk_geom_idx == scs->svt_aom_geom_idx) {\
+        scs->blk_geom_mds = shared_blk_geom;\
+        return EB_ErrorNone;\
+    }\
+    EB_MALLOC_ARRAY(scs->blk_geom_mds, scs->max_block_cnt);\
+    svt_aom_build_blk_geom(scs->svt_aom_geom_idx, scs->blk_geom_mds);\
+    return EB_ErrorNone;\
+}' Source/Lib/Globals/enc_handle.c
+sed -i 's|handle->scs_instance->scs->blk_geom_mds != NULL) {|handle->scs_instance->scs->blk_geom_mds != NULL \&\& handle->scs_instance->scs->blk_geom_mds != shared_blk_geom) {|' Source/Lib/Globals/enc_handle.c
+sed -i 's|^        return_error = svt_av1_set_default_params(config_ptr);$|        return_error = config_ptr ? svt_av1_set_default_params(config_ptr) : EB_ErrorNone;|' Source/Lib/Globals/enc_handle.c
+sed -i 's|^        SET_FUNCTIONS_X86(ptr, neon, neon_dotprod, neon_i8mm, sve, sve2) *\\$|        SET_FUNCTIONS_X86(ptr, mmx, sse, sse2, sse3, ssse3, sse4_1, sse4_2, avx, avx2, avx512) \\|' Source/Lib/Codec/aom_dsp_rtcd.c Source/Lib/Codec/common_dsp_rtcd.c
+sed -i 's|^    if (scs->static_config.encoder_bit_depth == EB_EIGHT_BIT) {$|    if (0) {|' Source/Lib/Globals/enc_handle.c
+sed -i 's|^    if (validate_on_the_fly_settings(p_buffer,scs, enc_handle_ptr->scs_instance->config_mutex)) {$|    if (0) {|' Source/Lib/Globals/enc_handle.c
+sed -i 's|^    EbErrorType return_error = svt_av1_verify_settings(scs);$|    EbErrorType return_error = EB_ErrorNone;|' Source/Lib/Globals/enc_handle.c
+sed -i 's|^            if (svt_aom_copy_metadata_buffer(dst, src->metadata) != EB_ErrorNone)$|            if (1)|' Source/Lib/Globals/enc_handle.c
+sed -i 's/void NOINLINE svt_aom_enc_make_inter_predictor(/void svt_aom_enc_make_inter_predictor(/' Source/Lib/Codec/enc_inter_prediction.c
+'@
 
     if ($apply8MbStackPatch) {
-        $threadsFile = 'Source\Lib\Codec\svt_threads.c'
-        $content = (Get-Content -Raw $threadsFile).Replace("`r`n", "`n")
-        $content = $content.Replace('1 MiB', '8 MiB').Replace('const size_t min_stack_size = 1024 * 1024;', 'const size_t min_stack_size = 8 * 1024 * 1024;')
-        $content = $content.Replace('0, // default stack size', '8 * 1024 * 1024, // default stack size').Replace('0, // thread active when created', 'STACK_SIZE_PARAM_IS_A_RESERVATION, // thread active when created')
-        Set-Content -Path $threadsFile -Value $content -NoNewline
-    }
+        $patchScript += @'
 
-    $encHandleFile = 'Source\Lib\Globals\enc_handle.c'
-    $content = (Get-Content -Raw $encHandleFile).Replace("`r`n", "`n")
-    $lines = New-Object System.Collections.Generic.List[string]
-    foreach ($l in $content.Split("`n")) { $lines.Add($l) }
-
-    $rangeStart = '    svt_aom_setup_common_rtcd_internal(scs->static_config.use_cpu_flags);'
-    $rangeEnd   = '    svt_aom_build_blk_geom(scs->svt_aom_geom_idx, scs->blk_geom_mds);'
-    $startIdx = -1
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -eq $rangeStart) { $startIdx = $i; break }
+sed -i 's/\r//g' Source/Lib/Codec/svt_threads.c
+sed -i 's/1 MiB/8 MiB/g' Source/Lib/Codec/svt_threads.c
+sed -i 's|0, // default stack size|8 * 1024 * 1024, // default stack size|' Source/Lib/Codec/svt_threads.c
+sed -i 's|0, // thread active when created|STACK_SIZE_PARAM_IS_A_RESERVATION, // thread active when created|' Source/Lib/Codec/svt_threads.c
+sed -i 's|const size_t min_stack_size = 1024 \* 1024;|const size_t min_stack_size = 8 * 1024 * 1024;|' Source/Lib/Codec/svt_threads.c
+'@
     }
-    if ($startIdx -ge 0) {
-        $endIdx = -1
-        for ($i = $startIdx + 1; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -eq $rangeEnd) { $endIdx = $i; break }
-        }
-        if ($endIdx -ge 0) {
-            $lines.RemoveRange($startIdx, $endIdx - $startIdx + 1)
-            $repl = @(
-                '    return_error = svt_shared_setup(scs);',
-                '    if (return_error != EB_ErrorNone)',
-                '        return return_error;'
-            )
-            for ($j = $repl.Length - 1; $j -ge 0; $j--) { $lines.Insert($startIdx, $repl[$j]) }
-        }
-    }
-
-    $joined = [string]::Join("`n", $lines)
-    if ($joined -notmatch 'init_shared_rtcd') {
-        $anchorIdx = -1
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -eq 'DEFINE_ONCE(global_tables_once);') { $anchorIdx = $i; break }
-        }
-        if ($anchorIdx -ge 0) {
-            $sharedSetup = @(
-                '',
-                'static uint64_t          shared_cpu_flags;',
-                'static uint32_t          shared_geom_idx;',
-                'static uint16_t          shared_geom_cnt;',
-                'static struct BlockGeom *shared_blk_geom;',
-                'static uint32_t          shared_blk_geom_idx;',
-                '',
-                'static ONCE_ROUTINE(init_shared_rtcd) {',
-                '    svt_aom_setup_common_rtcd_internal(shared_cpu_flags);',
-                '    svt_aom_setup_rtcd_internal(shared_cpu_flags);',
-                '    ONCE_ROUTINE_EPILOG;',
-                '}',
-                'DEFINE_ONCE(shared_rtcd_once);',
-                '',
-                'static ONCE_ROUTINE(init_shared_blk_geom) {',
-                '    shared_blk_geom_idx = shared_geom_idx;',
-                '    EB_MALLOC_ARRAY_NO_CHECK(shared_blk_geom, shared_geom_cnt);',
-                '    if (shared_blk_geom)',
-                '        svt_aom_build_blk_geom(shared_blk_geom_idx, shared_blk_geom);',
-                '    ONCE_ROUTINE_EPILOG;',
-                '}',
-                'DEFINE_ONCE(shared_blk_geom_once);',
-                '',
-                'static EbErrorType svt_shared_setup(SequenceControlSet *scs) {',
-                '    shared_cpu_flags = scs->static_config.use_cpu_flags;',
-                '    svt_run_once(&shared_rtcd_once, init_shared_rtcd);',
-                '    svt_run_once(&global_tables_once, init_global_tables);',
-                '    shared_geom_idx = scs->svt_aom_geom_idx;',
-                '    shared_geom_cnt = scs->max_block_cnt;',
-                '    svt_run_once(&shared_blk_geom_once, init_shared_blk_geom);',
-                '    if (shared_blk_geom && shared_blk_geom_idx == scs->svt_aom_geom_idx) {',
-                '        scs->blk_geom_mds = shared_blk_geom;',
-                '        return EB_ErrorNone;',
-                '    }',
-                '    EB_MALLOC_ARRAY(scs->blk_geom_mds, scs->max_block_cnt);',
-                '    svt_aom_build_blk_geom(scs->svt_aom_geom_idx, scs->blk_geom_mds);',
-                '    return EB_ErrorNone;',
-                '}'
-            )
-            for ($j = $sharedSetup.Length - 1; $j -ge 0; $j--) {
-                $lines.Insert($anchorIdx + 1, $sharedSetup[$j])
-            }
-        }
-    }
-
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        $ln = $lines[$i]
-        if ($ln.Contains('handle->scs_instance->scs->blk_geom_mds != NULL) {')) {
-            $lines[$i] = $ln.Replace('handle->scs_instance->scs->blk_geom_mds != NULL) {', 'handle->scs_instance->scs->blk_geom_mds != NULL && handle->scs_instance->scs->blk_geom_mds != shared_blk_geom) {')
-        }
-        elseif ($ln -eq '        return_error = svt_av1_set_default_params(config_ptr);') {
-            $lines[$i] = '        return_error = config_ptr ? svt_av1_set_default_params(config_ptr) : EB_ErrorNone;'
-        }
-        elseif ($ln -eq '    if (scs->static_config.encoder_bit_depth == EB_EIGHT_BIT) {') {
-            $lines[$i] = '    if (0) {'
-        }
-        elseif ($ln -eq '    if (validate_on_the_fly_settings(p_buffer,scs, enc_handle_ptr->scs_instance->config_mutex)) {') {
-            $lines[$i] = '    if (0) {'
-        }
-        elseif ($ln -eq '    EbErrorType return_error = svt_av1_verify_settings(scs);') {
-            $lines[$i] = '    EbErrorType return_error = EB_ErrorNone;'
-        }
-        elseif ($ln -eq '            if (svt_aom_copy_metadata_buffer(dst, src->metadata) != EB_ErrorNone)') {
-            $lines[$i] = '            if (1)'
-        }
-    }
-    Set-Content -Path $encHandleFile -Value ([string]::Join("`n", $lines)) -NoNewline
 
     if ([System.Runtime.Intrinsics.X86.Avx2]::IsSupported) {
-        $macrosFile = 'Source\API\EbConfigMacros.h'
-        $lines = New-Object System.Collections.Generic.List[string]
-        foreach ($l in ((Get-Content -Raw $macrosFile).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
-        $inBlock = $false
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-            $ln = $lines[$i]
-            if ($ln -eq '#ifndef CONFIG_X86_AVX2_IS_GUARANTEED') { $inBlock = $true; continue }
-            if ($inBlock -and $ln -eq '#endif') { $inBlock = $false; continue }
-            if ($inBlock -and $ln -eq '#define CONFIG_X86_AVX2_IS_GUARANTEED       0') {
-                $lines[$i] = '#define CONFIG_X86_AVX2_IS_GUARANTEED       1'
-            }
-        }
-        Set-Content -Path $macrosFile -Value ([string]::Join("`n", $lines)) -NoNewline
+        $patchScript += @'
+
+sed -i 's/\r//g' Source/API/EbConfigMacros.h
+sed -i '/^#ifndef CONFIG_X86_AVX2_IS_GUARANTEED$/,/^#endif$/s/       0$/       1/' Source/API/EbConfigMacros.h
+'@
     }
 
-    $rtcdFiles = @('Source\Lib\Codec\aom_dsp_rtcd.c', 'Source\Lib\Codec\common_dsp_rtcd.c')
-    foreach ($rtcdFile in $rtcdFiles) {
-        $lines = New-Object System.Collections.Generic.List[string]
-        foreach ($l in ((Get-Content -Raw $rtcdFile).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
-        $pat = '^        SET_FUNCTIONS_X86\(ptr, neon, neon_dotprod, neon_i8mm, sve, sve2\) *\\$'
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -match $pat) {
-                $lines[$i] = '        SET_FUNCTIONS_X86(ptr, mmx, sse, sse2, sse3, ssse3, sse4_1, sse4_2, avx, avx2, avx512) \'
-            }
-        }
-        Set-Content -Path $rtcdFile -Value ([string]::Join("`n", $lines)) -NoNewline
+    Set-Content -Path 'patch_svt.sh' -Value ($patchScript.Replace("`r`n", "`n") + "`n") -Encoding Ascii -NoNewline
+    $unixPath = $PWD.Path -replace '\\', '/'
+    Invoke-Step "Patching SVT-AV1 (sed)" {
+        & $MsysExe -lc "cd `"$unixPath`" && sh ./patch_svt.sh"
     }
-
-    $encInterFile = 'Source\Lib\Codec\enc_inter_prediction.c'
-    $content = Get-Content -Raw $encInterFile
-    $content = $content.Replace('void NOINLINE svt_aom_enc_make_inter_predictor(', 'void svt_aom_enc_make_inter_predictor(')
-    Set-Content -Path $encInterFile -Value $content -NoNewline
+    Remove-Item 'patch_svt.sh' -Force -ErrorAction SilentlyContinue
 }
 
 function Build-SvtAv1 {
-    param([string]$Variant, [string]$Dir, [string]$Branch, [string]$Repo, [string]$ExtraCFlags, [string]$ArchFlags, [bool]$NoPrompt)
+    param([string]$Variant, [string]$Dir, [string]$Branch, [string]$Repo, [string]$ExtraCFlags, [string]$ArchFlags, [bool]$NoPrompt, [string]$MsysExe)
 
     if (Test-Path 'lib\SvtAv1Enc.lib') {
         if ($NoPrompt) {
@@ -612,7 +544,7 @@ function Build-SvtAv1 {
     }
     Push-Location $Dir
 
-    Patch-SvtAv1Sources -Variant $Variant
+    Patch-SvtAv1Sources -Variant $Variant -MsysExe $MsysExe
 
     $pgoDir = "$PWD/svt_pgo_data"
     if (Test-Path $pgoDir) { Remove-Item -Recurse -Force $pgoDir }
@@ -1051,97 +983,42 @@ make -j$(nproc)
 }
 
 function Patch-AvmSources {
-    $file = 'av2/encoder/part_split_prune_tflite.cc'
-    $lines = New-Object System.Collections.Generic.List[string]
-    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
-    $idx = $lines.IndexOf('static void ensure_tflite_init(void **context, MODEL_TYPE model_type) {')
-    if ($idx -ge 0) { $lines.Insert($idx, 'static thread_local PartSplitContext *tls_part_split;') }
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -eq '  if (*context == nullptr) *context = new PartSplitContext();') {
-            $lines[$i] = "  if (*context == nullptr) {`n    if (tls_part_split == nullptr) tls_part_split = new PartSplitContext();`n    *context = tls_part_split;`n  }"
-            break
-        }
-    }
-    $closeIdx = $lines.IndexOf('extern "C" void av2_part_prune_tflite_close(void **context) {')
-    if ($closeIdx -ge 0) {
-        $endIdx = -1
-        for ($i = $closeIdx + 1; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -eq '}') { $endIdx = $i; break }
-        }
-        if ($endIdx -ge 0) {
-            $lines.RemoveRange($closeIdx, $endIdx - $closeIdx + 1)
-            $lines.Insert($closeIdx, 'extern "C" void av2_part_prune_tflite_close(void **context) { *context = nullptr; }')
-        }
-    }
-    Set-Content -Path $file -Value ([string]::Join("`n", $lines)) -NoNewline
+    param([string]$MsysExe)
 
-    $file = 'av2/encoder/intra_dip_mode_prune_tflite.cc'
-    $lines = New-Object System.Collections.Generic.List[string]
-    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
-    $idx = $lines.IndexOf('static void ensure_tflite_init(void **context, int model_index) {')
-    if ($idx -ge 0) { $lines.Insert($idx, 'static thread_local DipContext *tls_dip;') }
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -eq '    *context = new DipContext();') {
-            $lines[$i] = "    if (tls_dip == nullptr) tls_dip = new DipContext();`n    *context = tls_dip;"
-            break
-        }
+    $patchScript = @'
+#!/bin/sh
+set -e
+sed -i 's/\r//g' av2/encoder/part_split_prune_tflite.cc av2/encoder/intra_dip_mode_prune_tflite.cc avm_scale/avm_scale.cmake avm/src/avm_encoder.c av2/av2_cx_iface.c
+grep -q tls_part_split av2/encoder/part_split_prune_tflite.cc || sed -i '/^static void ensure_tflite_init(void \*\*context, MODEL_TYPE model_type) {$/i\
+static thread_local PartSplitContext *tls_part_split;' av2/encoder/part_split_prune_tflite.cc
+sed -i 's|^  if (\*context == nullptr) \*context = new PartSplitContext();$|  if (*context == nullptr) {\n    if (tls_part_split == nullptr) tls_part_split = new PartSplitContext();\n    *context = tls_part_split;\n  }|' av2/encoder/part_split_prune_tflite.cc
+sed -i '/^extern "C" void av2_part_prune_tflite_close(void \*\*context) {$/,/^}$/c\
+extern "C" void av2_part_prune_tflite_close(void **context) { *context = nullptr; }' av2/encoder/part_split_prune_tflite.cc
+grep -q tls_dip av2/encoder/intra_dip_mode_prune_tflite.cc || sed -i '/^static void ensure_tflite_init(void \*\*context, int model_index) {$/i\
+static thread_local DipContext *tls_dip;' av2/encoder/intra_dip_mode_prune_tflite.cc
+sed -i 's|^    \*context = new DipContext();$|    if (tls_dip == nullptr) tls_dip = new DipContext();\n    *context = tls_dip;|' av2/encoder/intra_dip_mode_prune_tflite.cc
+sed -i '/^extern "C" void intra_dip_mode_prune_close(void \*\*context) {$/,/^}$/c\
+extern "C" void intra_dip_mode_prune_close(void **context) { *context = nullptr; }' av2/encoder/intra_dip_mode_prune_tflite.cc
+sed -i '\|generic/avm_scale.c"$|d;\|generic/gen_scalers.c"$|d' avm_scale/avm_scale.cmake
+sed -i 's/^#if ARCH_X86 || ARCH_X86_64$/#if 0/' avm/src/avm_encoder.c
+sed -i 's/if (!ctx || (img \&\& !duration))/if (0)/' avm/src/avm_encoder.c
+sed -i 's/if (!ctx->iface || !ctx->priv)/if (0)/g' avm/src/avm_encoder.c
+sed -i 's/if (!(ctx->iface->caps \& AVM_CODEC_CAP_ENCODER))/if (0)/g' avm/src/avm_encoder.c
+sed -i 's/if (!iter)/if (0)/' avm/src/avm_encoder.c
+sed -i 's|^                                    const avm_image_t \*img) {$|                                    const avm_image_t *img) { return AVM_CODEC_OK;|' av2/av2_cx_iface.c
+sed -i 's|^                                       const struct av2_extracfg \*extra_cfg) {$|                                       const struct av2_extracfg *extra_cfg) { return AVM_CODEC_OK;|' av2/av2_cx_iface.c
+grep -q '^    if (ctx->cx_data == NULL) {$' av2/av2_cx_iface.c || sed -i '/^static avm_codec_err_t encoder_encode(/,/^    if (res == AVM_CODEC_OK) {$/s|^    if (res == AVM_CODEC_OK) {$|    if (ctx->cx_data == NULL) {|' av2/av2_cx_iface.c
+'@
+    Set-Content -Path 'patch_avm.sh' -Value ($patchScript.Replace("`r`n", "`n") + "`n") -Encoding Ascii -NoNewline
+    $unixPath = $PWD.Path -replace '\\', '/'
+    Invoke-Step "Patching AVM (sed)" {
+        & $MsysExe -lc "cd `"$unixPath`" && sh ./patch_avm.sh"
     }
-    $closeIdx = $lines.IndexOf('extern "C" void intra_dip_mode_prune_close(void **context) {')
-    if ($closeIdx -ge 0) {
-        $endIdx = -1
-        for ($i = $closeIdx + 1; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -eq '}') { $endIdx = $i; break }
-        }
-        if ($endIdx -ge 0) {
-            $lines.RemoveRange($closeIdx, $endIdx - $closeIdx + 1)
-            $lines.Insert($closeIdx, 'extern "C" void intra_dip_mode_prune_close(void **context) { *context = nullptr; }')
-        }
-    }
-    Set-Content -Path $file -Value ([string]::Join("`n", $lines)) -NoNewline
-
-    $file = 'avm_scale/avm_scale.cmake'
-    $lines = New-Object System.Collections.Generic.List[string]
-    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
-    $kept = New-Object System.Collections.Generic.List[string]
-    foreach ($l in $lines) {
-        if ($l.Contains('generic/avm_scale.c"') -or $l.Contains('generic/gen_scalers.c"')) { continue }
-        $kept.Add($l)
-    }
-    Set-Content -Path $file -Value ([string]::Join("`n", $kept)) -NoNewline
-
-    $file = 'avm/src/avm_encoder.c'
-    $content = Get-Content -Raw $file
-    $content = $content.Replace('#if ARCH_X86 || ARCH_X86_64', '#if 0')
-    $content = $content.Replace('if (!ctx || (img && !duration))', 'if (0)')
-    $content = $content.Replace('if (!ctx->iface || !ctx->priv)', 'if (0)')
-    $content = $content.Replace('if (!(ctx->iface->caps & AVM_CODEC_CAP_ENCODER))', 'if (0)')
-    $content = $content.Replace('if (!iter)', 'if (0)')
-    Set-Content -Path $file -Value $content -NoNewline
-
-    $file = 'av2/av2_cx_iface.c'
-    $lines = New-Object System.Collections.Generic.List[string]
-    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -match '^ +const avm_image_t \*img\) \{$') { $lines[$i] = $lines[$i] + ' return AVM_CODEC_OK;' }
-        elseif ($lines[$i] -match '^ +const struct av2_extracfg \*extra_cfg\) \{$') { $lines[$i] = $lines[$i] + ' return AVM_CODEC_OK;' }
-    }
-    $startIdx = -1
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i].StartsWith('static avm_codec_err_t encoder_encode(')) { $startIdx = $i; break }
-    }
-    if ($startIdx -ge 0) {
-        for ($i = $startIdx + 1; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -eq '    if (res == AVM_CODEC_OK) {') {
-                $lines[$i] = '    if (ctx->cx_data == NULL) {'
-                break
-            }
-        }
-    }
-    Set-Content -Path $file -Value ([string]::Join("`n", $lines)) -NoNewline
+    Remove-Item 'patch_avm.sh' -Force -ErrorAction SilentlyContinue
 }
 
 function Build-Avm {
-    param([bool]$NoPrompt)
+    param([bool]$NoPrompt, [string]$MsysExe)
     if (Test-Path 'lib\avm_full.lib') {
         if ($NoPrompt) {
             $choice = if ($ForceRebuild) { 'Y' } else { 'N' }
@@ -1169,7 +1046,7 @@ function Build-Avm {
     }
     Push-Location avm
     Invoke-Step "Patching AVM TFLite CMakeLists" { git apply "..\patch\tflite-windows-cmakelists.patch" }
-    Patch-AvmSources
+    Patch-AvmSources -MsysExe $MsysExe
     if (Test-Path build) { Remove-Item -Recurse -Force build }
     $cmakeArgs = @('-B', 'build', '-G', 'Ninja',
         '-DCMAKE_BUILD_TYPE=Release',
@@ -1197,10 +1074,18 @@ function Build-Avm {
         '-DCONFIG_DENOISE=0',
         '-DCONFIG_TENSORFLOW_LITE=1')
     Invoke-Step "Configuring AVM" { cmake @cmakeArgs }
-    $liteCmake = 'third_party/tensorflow/tensorflow/lite/CMakeLists.txt'
-    $liteContent = (Get-Content -Raw $liteCmake).Replace("`r`n", "`n")
-    $liteContent = $liteContent.Replace('FILTER "(.*_test_util_internal|test_.*|.*_ops_wrapper)\\.(cc|h)"', 'FILTER "(/[^/]*_test_util_internal[^/]*|/test_[^/]*|/[^/]*_ops_wrapper)\\.(cc|h)$"')
-    Set-Content -Path $liteCmake -Value $liteContent -NoNewline
+    $litePatch = @'
+#!/bin/sh
+set -e
+sed -i 's/\r//g' third_party/tensorflow/tensorflow/lite/CMakeLists.txt
+sed -i 's#FILTER "(.*_test_util_internal|test_.*|.*_ops_wrapper)\\\\.(cc|h)"#FILTER "(/[^/]*_test_util_internal[^/]*|/test_[^/]*|/[^/]*_ops_wrapper)\\\\.(cc|h)$"#' third_party/tensorflow/tensorflow/lite/CMakeLists.txt
+'@
+    Set-Content -Path 'patch_avm_lite.sh' -Value ($litePatch.Replace("`r`n", "`n") + "`n") -Encoding Ascii -NoNewline
+    $unixLitePath = $PWD.Path -replace '\\', '/'
+    Invoke-Step "Patching AVM TFLite file list (sed)" {
+        & $MsysExe -lc "cd `"$unixLitePath`" && sh ./patch_avm_lite.sh"
+    }
+    Remove-Item 'patch_avm_lite.sh' -Force -ErrorAction SilentlyContinue
     Invoke-Step "Reconfiguring AVM" { cmake @cmakeArgs }
     Invoke-Step "Building AVM" { ninja -C build avm }
     if (-not (Test-Path 'build\avm.lib')) {
@@ -1218,144 +1103,50 @@ function Build-Avm {
 }
 
 function Patch-VvencSources {
-    $file = 'CMakeLists.txt'
-    $content = (Get-Content -Raw $file).Replace("`r`n", "`n")
-    $content = $content.Replace('set( CMAKE_POSITION_INDEPENDENT_CODE TRUE )', 'set( CMAKE_POSITION_INDEPENDENT_CODE FALSE )')
-    $content = $content.Replace('set( CMAKE_CXX_STANDARD 14 )', 'set( CMAKE_CXX_STANDARD 20 )')
-    Set-Content -Path $file -Value $content -NoNewline
+    param([string]$MsysExe)
 
-    $file = 'source\Lib\vvenc\vvencimpl.cpp'
-    $lines = New-Object System.Collections.Generic.List[string]
-    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
-    $kept = New-Object System.Collections.Generic.List[string]
-    foreach ($l in $lines) {
-        if ($l.Contains('setSIMDExtension( nullptr );')) { continue }
-        if ($l.Contains('m_cEncoderInfo = createEncoderInfoStr();')) { continue }
-        if ($l.Contains('m_cVVEncCfgExt = *config;')) { continue }
-        if ($l.Contains('malloc_trim(0);')) { continue }
-        $kept.Add($l)
+    $patchScript = @'
+#!/bin/sh
+set -e
+sed -i 's/\r//g' CMakeLists.txt source/Lib/vvenc/vvencimpl.cpp source/Lib/vvenc/vvencimpl.h source/Lib/vvenc/vvenc.cpp source/Lib/vvenc/vvencCfg.cpp source/Lib/EncoderLib/EncGOP.cpp source/Lib/EncoderLib/EncPicture.cpp source/Lib/CommonLib/TypeDef.h
+sed -i 's/set( CMAKE_POSITION_INDEPENDENT_CODE TRUE )/set( CMAKE_POSITION_INDEPENDENT_CODE FALSE )/' CMakeLists.txt
+sed -i 's/set( CMAKE_CXX_STANDARD 14 )/set( CMAKE_CXX_STANDARD 20 )/' CMakeLists.txt
+sed -i '/setSIMDExtension( nullptr );/d' source/Lib/vvenc/vvencimpl.cpp
+sed -i '/m_cEncoderInfo = createEncoderInfoStr();/d' source/Lib/vvenc/vvencimpl.cpp
+sed -i '/m_cVVEncCfgExt = \*config;/d' source/Lib/vvenc/vvencimpl.cpp
+sed -i '/vvenc_config           m_cVVEncCfgExt;/d' source/Lib/vvenc/vvencimpl.h
+sed -i 's/if ( vvenc_init_config_parameter(&m_cVVEncCfg) )/if ( !m_cVVEncCfg.m_configDone \&\& vvenc_init_config_parameter(\&m_cVVEncCfg) )/' source/Lib/vvenc/vvencimpl.cpp
+sed -i '/malloc_trim(0);/d' source/Lib/vvenc/vvencimpl.cpp
+sed -i 's/! xConvertVerifyYUVBuffer( pcYUVBuffer )/false/' source/Lib/vvenc/vvencimpl.cpp
+grep -q 'false && !m_bInitialized' source/Lib/vvenc/vvencimpl.cpp || {
+    sed -i '/^int VVEncImpl::encode(/,/^  int iRet= VVENC_OK;$/s|^  if(|  if( false \&\& |' source/Lib/vvenc/vvencimpl.cpp
+    sed -i '/^    if( m_eState == INTERNAL_STATE_FLUSHING ) { m_cErrorString = "encoder already received flush indication/,/^    if ( false )$/s|^    if(|    if( false \&\& |' source/Lib/vvenc/vvencimpl.cpp
+}
+sed -i '/memset( accessUnit->infoString, 0, sizeof( accessUnit->infoString ) );/d' source/Lib/vvenc/vvenc.cpp
+sed -i -e '/^  accessUnit->cts             = 0;$/d' -e '/^  accessUnit->dts             = 0;$/d' \
+    -e '/^  accessUnit->ctsValid        = false;$/d' -e '/^  accessUnit->dtsValid        = false;$/d' \
+    -e '/^  accessUnit->sliceType       = VVENC_NUMBER_OF_SLICE_TYPES;$/d' \
+    -e '/^  accessUnit->refPic          = false;$/d' -e '/^  accessUnit->temporalLayer   = 0;$/d' \
+    -e '/^  accessUnit->poc             = 0;$/d' -e '/^  accessUnit->status          = 0;$/d' \
+    -e '/accessUnit->infoString\[0\]/d' source/Lib/vvenc/vvenc.cpp
+sed -i '/^VVENC_DECL void vvenc_accessUnit_reset/,/^}/s|^  if( nullptr == accessUnit )$|  if( false )|' source/Lib/vvenc/vvenc.cpp
+sed -i 's|^  if ( ! bflag )$|  if ( true )|' source/Lib/vvenc/vvencCfg.cpp
+sed -i 's/m_nalUnitData\.str()\.c_str()/m_nalUnitData.view().data()/g' source/Lib/vvenc/vvencimpl.cpp source/Lib/EncoderLib/EncGOP.cpp
+sed -i 's/m_nalUnitData\.str()\.size()/m_nalUnitData.view().size()/g' source/Lib/vvenc/vvencimpl.cpp source/Lib/EncoderLib/EncGOP.cpp
+sed -i '/xPrintPictureInfo ( pic, au, digestStr, m_pcEncCfg->m_printFrameMSE, isEncodeLtRef );/d' source/Lib/EncoderLib/EncGOP.cpp
+sed -i '/xCalcDistortion( pic, \*slice->sps );/d' source/Lib/EncoderLib/EncPicture.cpp
+sed -i 's|^#define CHECK(c,x)          if(c){ THROW(x); }$|#define CHECK(c,x)|' source/Lib/CommonLib/TypeDef.h
+'@
+    Set-Content -Path 'patch_vvenc.sh' -Value ($patchScript.Replace("`r`n", "`n") + "`n") -Encoding Ascii -NoNewline
+    $unixPath = $PWD.Path -replace '\\', '/'
+    Invoke-Step "Patching VVenC (sed)" {
+        & $MsysExe -lc "cd `"$unixPath`" && sh ./patch_vvenc.sh"
     }
-    $lines = $kept
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i].Contains('if ( vvenc_init_config_parameter(&m_cVVEncCfg) )')) {
-            $lines[$i] = $lines[$i].Replace('if ( vvenc_init_config_parameter(&m_cVVEncCfg) )', 'if ( !m_cVVEncCfg.m_configDone && vvenc_init_config_parameter(&m_cVVEncCfg) )')
-        }
-        if ($lines[$i].Contains('! xConvertVerifyYUVBuffer( pcYUVBuffer )')) {
-            $lines[$i] = $lines[$i].Replace('! xConvertVerifyYUVBuffer( pcYUVBuffer )', 'false')
-        }
-        $lines[$i] = $lines[$i].Replace('m_nalUnitData.str().c_str()', 'm_nalUnitData.view().data()')
-        $lines[$i] = $lines[$i].Replace('m_nalUnitData.str().size()', 'm_nalUnitData.view().size()')
-    }
-    if ([string]::Join("`n", $lines) -notmatch 'false && !m_bInitialized') {
-        $startIdx = -1
-        $endIdx = -1
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($startIdx -lt 0 -and $lines[$i].StartsWith('int VVEncImpl::encode(')) { $startIdx = $i }
-            elseif ($startIdx -ge 0 -and $lines[$i] -eq '  int iRet= VVENC_OK;') { $endIdx = $i; break }
-        }
-        if ($startIdx -ge 0 -and $endIdx -ge 0) {
-            for ($i = $startIdx; $i -le $endIdx; $i++) {
-                if ($lines[$i] -match '^  if\(') { $lines[$i] = $lines[$i] -replace '^  if\(', '  if( false && ' }
-            }
-        }
-        $startIdx = -1
-        $endIdx = -1
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($startIdx -lt 0 -and $lines[$i].StartsWith('    if( m_eState == INTERNAL_STATE_FLUSHING ) { m_cErrorString = "encoder already received flush indication')) { $startIdx = $i }
-            elseif ($startIdx -ge 0 -and $lines[$i] -eq '    if ( false )') { $endIdx = $i; break }
-        }
-        if ($startIdx -ge 0 -and $endIdx -ge 0) {
-            for ($i = $startIdx; $i -le $endIdx; $i++) {
-                if ($lines[$i] -match '^    if\(') { $lines[$i] = $lines[$i] -replace '^    if\(', '    if( false && ' }
-            }
-        }
-    }
-    Set-Content -Path $file -Value ([string]::Join("`n", $lines)) -NoNewline
-
-    $file = 'source\Lib\vvenc\vvencimpl.h'
-    $lines = New-Object System.Collections.Generic.List[string]
-    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
-    $kept = New-Object System.Collections.Generic.List[string]
-    foreach ($l in $lines) {
-        if ($l.Contains('m_cVVEncCfgExt')) { continue }
-        $kept.Add($l)
-    }
-    Set-Content -Path $file -Value ([string]::Join("`n", $kept)) -NoNewline
-
-    $file = 'source\Lib\vvenc\vvenc.cpp'
-    $lines = New-Object System.Collections.Generic.List[string]
-    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
-    $dropped = @(
-        '  accessUnit->cts             = 0;',
-        '  accessUnit->dts             = 0;',
-        '  accessUnit->ctsValid        = false;',
-        '  accessUnit->dtsValid        = false;',
-        '  accessUnit->sliceType       = VVENC_NUMBER_OF_SLICE_TYPES;',
-        '  accessUnit->refPic          = false;',
-        '  accessUnit->temporalLayer   = 0;',
-        '  accessUnit->poc             = 0;',
-        '  accessUnit->status          = 0;'
-    )
-    $kept = New-Object System.Collections.Generic.List[string]
-    foreach ($l in $lines) {
-        if ($l.Contains('memset( accessUnit->infoString, 0, sizeof( accessUnit->infoString ) );')) { continue }
-        if ($l.Contains('accessUnit->infoString[0]')) { continue }
-        if ($dropped -contains $l) { continue }
-        $kept.Add($l)
-    }
-    $lines = $kept
-    $startIdx = -1
-    $endIdx = -1
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($startIdx -lt 0 -and $lines[$i].StartsWith('VVENC_DECL void vvenc_accessUnit_reset')) { $startIdx = $i }
-        elseif ($startIdx -ge 0 -and $lines[$i].StartsWith('}')) { $endIdx = $i; break }
-    }
-    if ($startIdx -ge 0 -and $endIdx -ge 0) {
-        for ($i = $startIdx; $i -le $endIdx; $i++) {
-            if ($lines[$i] -eq '  if( nullptr == accessUnit )') { $lines[$i] = '  if( false )'; break }
-        }
-    }
-    Set-Content -Path $file -Value ([string]::Join("`n", $lines)) -NoNewline
-
-    $file = 'source\Lib\vvenc\vvencCfg.cpp'
-    $lines = New-Object System.Collections.Generic.List[string]
-    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -eq '  if ( ! bflag )') { $lines[$i] = '  if ( true )' }
-    }
-    Set-Content -Path $file -Value ([string]::Join("`n", $lines)) -NoNewline
-
-    $file = 'source\Lib\EncoderLib\EncGOP.cpp'
-    $content = (Get-Content -Raw $file).Replace("`r`n", "`n")
-    $content = $content.Replace('m_nalUnitData.str().c_str()', 'm_nalUnitData.view().data()')
-    $content = $content.Replace('m_nalUnitData.str().size()', 'm_nalUnitData.view().size()')
-    $lines = New-Object System.Collections.Generic.List[string]
-    foreach ($l in $content.Split("`n")) { $lines.Add($l) }
-    $kept = New-Object System.Collections.Generic.List[string]
-    foreach ($l in $lines) {
-        if ($l.Contains('xPrintPictureInfo ( pic, au, digestStr, m_pcEncCfg->m_printFrameMSE, isEncodeLtRef );')) { continue }
-        $kept.Add($l)
-    }
-    Set-Content -Path $file -Value ([string]::Join("`n", $kept)) -NoNewline
-
-    $file = 'source\Lib\EncoderLib\EncPicture.cpp'
-    $lines = New-Object System.Collections.Generic.List[string]
-    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
-    $kept = New-Object System.Collections.Generic.List[string]
-    foreach ($l in $lines) {
-        if ($l.Contains('xCalcDistortion( pic, *slice->sps );')) { continue }
-        $kept.Add($l)
-    }
-    Set-Content -Path $file -Value ([string]::Join("`n", $kept)) -NoNewline
-
-    $file = 'source\Lib\CommonLib\TypeDef.h'
-    $content = (Get-Content -Raw $file).Replace("`r`n", "`n")
-    $content = $content.Replace('#define CHECK(c,x)          if(c){ THROW(x); }', '#define CHECK(c,x)')
-    Set-Content -Path $file -Value $content -NoNewline
+    Remove-Item 'patch_vvenc.sh' -Force -ErrorAction SilentlyContinue
 }
 
 function Build-Vvenc {
-    param([bool]$NoPrompt)
+    param([bool]$NoPrompt, [string]$MsysExe)
     if (Test-Path 'lib\vvenc.lib') {
         if ($NoPrompt) {
             $choice = if ($ForceRebuild) { 'Y' } else { 'N' }
@@ -1382,7 +1173,7 @@ function Build-Vvenc {
         exit 1
     }
     Push-Location vvenc
-    Patch-VvencSources
+    Patch-VvencSources -MsysExe $MsysExe
     if (Test-Path build) { Remove-Item -Recurse -Force build }
     if (Test-Path lib) { Remove-Item -Recurse -Force lib }
     $cmakeArgs = @('-B', 'build', '-G', 'Ninja',
@@ -1409,72 +1200,41 @@ function Build-Vvenc {
 }
 
 function Patch-VvdecSources {
-    # CMakeLists.txt: static link like Linux (PIC off), C++20
-    $file = 'CMakeLists.txt'
-    $content = (Get-Content -Raw $file).Replace("`r`n", "`n")
-    $content = $content.Replace('set( CMAKE_POSITION_INDEPENDENT_CODE TRUE )', 'set( CMAKE_POSITION_INDEPENDENT_CODE FALSE )')
-    $content = $content.Replace('set( CMAKE_CXX_STANDARD 14 )', 'set( CMAKE_CXX_STANDARD 20 )')
-    Set-Content -Path $file -Value $content -NoNewline
+    param([string]$MsysExe)
 
-    $file = 'source\Lib\vvdec\vvdecimpl.cpp'
-    $lines = New-Object System.Collections.Generic.List[string]
-    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
-    if ([string]::Join("`n", $lines) -notmatch 'false && !m_bInitialized') {
-        $startIdx = -1
-        $endIdx = -1
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($startIdx -lt 0 -and $lines[$i].StartsWith('int VVDecImpl::decode(')) { $startIdx = $i }
-            elseif ($startIdx -ge 0 -and $lines[$i].Contains('not supported feature detected')) { $endIdx = $i; break }
-        }
-        if ($startIdx -ge 0 -and $endIdx -ge 0) {
-            for ($i = $startIdx; $i -le $endIdx; $i++) {
-                if ($lines[$i] -match '^  if\(') { $lines[$i] = $lines[$i] -replace '^  if\(', '  if( false && ' }
-            }
-        }
-        $startIdx = -1
-        $endIdx = -1
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($startIdx -lt 0 -and $lines[$i] -eq '  if( !rcAccessUnit.payload )') { $startIdx = $i }
-            elseif ($startIdx -ge 0 -and $lines[$i] -eq '  int iRet = VVDEC_OK;') { $endIdx = $i; break }
-        }
-        if ($startIdx -ge 0 -and $endIdx -ge 0) {
-            for ($i = $startIdx; $i -le $endIdx; $i++) {
-                if ($lines[$i] -match '^  if\(') { $lines[$i] = $lines[$i] -replace '^  if\(', '  if( false && ' }
-            }
-        }
+    $patchScript = @'
+#!/bin/sh
+set -e
+sed -i 's/\r//g' CMakeLists.txt source/Lib/vvdec/vvdecimpl.cpp source/Lib/DecoderLib/DecLib.cpp
+sed -i 's/set( CMAKE_POSITION_INDEPENDENT_CODE TRUE )/set( CMAKE_POSITION_INDEPENDENT_CODE FALSE )/' CMakeLists.txt
+sed -i 's/set( CMAKE_CXX_STANDARD 14 )/set( CMAKE_CXX_STANDARD 20 )/' CMakeLists.txt
+grep -q 'false && !m_bInitialized' source/Lib/vvdec/vvdecimpl.cpp || {
+    sed -i '/^int VVDecImpl::decode(/,/not supported feature detected/s|^  if(|  if( false \&\& |' source/Lib/vvdec/vvdecimpl.cpp
+    sed -i '/^  if( !rcAccessUnit.payload )$/,/^  int iRet = VVDEC_OK;$/s|^  if(|  if( false \&\& |' source/Lib/vvdec/vvdecimpl.cpp
+}
+sed -i '/^      bool bStartCodeFound = false;$/,/^      iAUEndPosVec.push_back( iLastPos );$/c\
+      const size_t iStartCodeSizeVec[1] = { rcAccessUnit.payload[2] == 1 ? (size_t)3 : (size_t)4 };\
+      const size_t iStartCodePosVec[1] = { iStartCodeSizeVec[0] };\
+      int iLastPos = rcAccessUnit.payloadUsedSize;\
+      while( iLastPos > 0 \&\& rcAccessUnit.payload[iLastPos-1] == 0 )\
+      {\
+        iLastPos--;\
+      }\
+      const size_t iAUEndPosVec[1] = { (size_t)iLastPos };' source/Lib/vvdec/vvdecimpl.cpp
+sed -i 's/!iStartCodePosVec.empty() && iStartCodePosVec\[0\] != iStartCodeSizeVec\[0\]/false/' source/Lib/vvdec/vvdecimpl.cpp
+sed -i 's/iAU < iStartCodePosVec.size()/iAU < 1/' source/Lib/vvdec/vvdecimpl.cpp
+sed -i 's|parserFrameDelay = std::min<int>( ( numDecThreads \* DEFAULT_PARSE_DELAY_FACTOR ) >> 4, DEFAULT_PARSE_DELAY_MAX );|parserFrameDelay = (int) m_decLibRecon.size();|' source/Lib/DecoderLib/DecLib.cpp
+'@
+    Set-Content -Path 'patch_vvdec.sh' -Value ($patchScript.Replace("`r`n", "`n") + "`n") -Encoding Ascii -NoNewline
+    $unixPath = $PWD.Path -replace '\\', '/'
+    Invoke-Step "Patching VVdeC (sed)" {
+        & $MsysExe -lc "cd `"$unixPath`" && sh ./patch_vvdec.sh"
     }
-    # Annex-B start-code scan replaced with single-AU fast path (markers vanish: naturally idempotent)
-    $startIdx = -1
-    $endIdx = -1
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -eq '      bool bStartCodeFound = false;') { $startIdx = $i }
-        elseif ($startIdx -ge 0 -and $lines[$i] -eq '      iAUEndPosVec.push_back( iLastPos );') { $endIdx = $i; break }
-    }
-    if ($startIdx -ge 0 -and $endIdx -ge 0) {
-        $lines.RemoveRange($startIdx, $endIdx - $startIdx + 1)
-        $lines.InsertRange($startIdx, [string[]]@(
-            '      const size_t iStartCodeSizeVec[1] = { rcAccessUnit.payload[2] == 1 ? (size_t)3 : (size_t)4 };',
-            '      const size_t iStartCodePosVec[1] = { iStartCodeSizeVec[0] };',
-            '      int iLastPos = rcAccessUnit.payloadUsedSize;',
-            '      while( iLastPos > 0 && rcAccessUnit.payload[iLastPos-1] == 0 )',
-            '      {',
-            '        iLastPos--;',
-            '      }',
-            '      const size_t iAUEndPosVec[1] = { (size_t)iLastPos };'))
-    }
-    $content = [string]::Join("`n", $lines)
-    $content = $content.Replace('!iStartCodePosVec.empty() && iStartCodePosVec[0] != iStartCodeSizeVec[0]', 'false')
-    $content = $content.Replace('iAU < iStartCodePosVec.size()', 'iAU < 1')
-    Set-Content -Path $file -Value $content -NoNewline
-
-    $file = 'source\Lib\DecoderLib\DecLib.cpp'
-    $content = (Get-Content -Raw $file).Replace("`r`n", "`n")
-    $content = $content.Replace('parserFrameDelay = std::min<int>( ( numDecThreads * DEFAULT_PARSE_DELAY_FACTOR ) >> 4, DEFAULT_PARSE_DELAY_MAX );', 'parserFrameDelay = (int) m_decLibRecon.size();')
-    Set-Content -Path $file -Value $content -NoNewline
+    Remove-Item 'patch_vvdec.sh' -Force -ErrorAction SilentlyContinue
 }
 
 function Build-Vvdec {
-    param([bool]$NoPrompt)
+    param([bool]$NoPrompt, [string]$MsysExe)
     if (Test-Path 'lib\vvdec.lib') {
         if ($NoPrompt) {
             $choice = if ($ForceRebuild) { 'Y' } else { 'N' }
@@ -1501,7 +1261,7 @@ function Build-Vvdec {
         exit 1
     }
     Push-Location vvdec
-    Patch-VvdecSources
+    Patch-VvdecSources -MsysExe $MsysExe
     if (Test-Path build) { Remove-Item -Recurse -Force build }
     if (Test-Path lib) { Remove-Item -Recurse -Force lib }
     $cmakeArgs = @('-B', 'build', '-G', 'Ninja',
@@ -1762,15 +1522,15 @@ if ($vshipBackend -eq 'cuda') {
 }
 Build-FFmpeg -VsPath $vsPath -MsysExe $msysExe -Backend $vshipBackend
 if ($enableAvm) {
-    Build-Avm -NoPrompt $NoPrompt
+    Build-Avm -NoPrompt $NoPrompt -MsysExe $msysExe
 }
 if ($enableVvenc) {
-    Build-Vvenc -NoPrompt $NoPrompt
+    Build-Vvenc -NoPrompt $NoPrompt -MsysExe $msysExe
 }
 if ($enableVvenc -and $enableTQ) {
-    Build-Vvdec -NoPrompt $NoPrompt
+    Build-Vvdec -NoPrompt $NoPrompt -MsysExe $msysExe
 }
-Build-SvtAv1 -Variant $svtVariant -Dir $svtDir -Branch $svtBranch -Repo $svtRepo -ExtraCFlags $svtExtraCFlags -ArchFlags $svtArchFlags -NoPrompt $NoPrompt
+Build-SvtAv1 -Variant $svtVariant -Dir $svtDir -Branch $svtBranch -Repo $svtRepo -ExtraCFlags $svtExtraCFlags -ArchFlags $svtArchFlags -NoPrompt $NoPrompt -MsysExe $msysExe
 Build-Xav -Backend $vshipBackend -SvtChoice $svtChoice -enableTQ $enableTQ -enableAvm $enableAvm -enableVvenc $enableVvenc
 
 Write-Host "[SUCCESS] Build script finished." -ForegroundColor Green
