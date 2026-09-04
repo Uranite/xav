@@ -409,7 +409,7 @@ function Build-Vship {
     }
 }
 
-function Patch-SvtAv1Sources {
+function Patch-SvtAv1 {
     param([string]$Variant, [string]$MsysExe)
 
     # should be fixed in mainline/tritium
@@ -544,7 +544,7 @@ function Build-SvtAv1 {
     }
     Push-Location $Dir
 
-    Patch-SvtAv1Sources -Variant $Variant -MsysExe $MsysExe
+    Patch-SvtAv1 -Variant $Variant -MsysExe $MsysExe
 
     $pgoDir = "$PWD/svt_pgo_data"
     if (Test-Path $pgoDir) { Remove-Item -Recurse -Force $pgoDir }
@@ -982,7 +982,7 @@ make -j$(nproc)
     }
 }
 
-function Patch-AvmSources {
+function Patch-Avm {
     param([string]$MsysExe)
 
     $patchScript = @'
@@ -1046,7 +1046,7 @@ function Build-Avm {
     }
     Push-Location avm
     Invoke-Step "Patching AVM TFLite CMakeLists" { git apply "..\patch\tflite-windows-cmakelists.patch" }
-    Patch-AvmSources -MsysExe $MsysExe
+    Patch-Avm -MsysExe $MsysExe
     if (Test-Path build) { Remove-Item -Recurse -Force build }
     $cmakeArgs = @('-B', 'build', '-G', 'Ninja',
         '-DCMAKE_BUILD_TYPE=Release',
@@ -1102,7 +1102,7 @@ sed -i 's#FILTER "(.*_test_util_internal|test_.*|.*_ops_wrapper)\\\\.(cc|h)"#FIL
     Copy-Item 'avm\build\avm_full.lib' 'lib\avm_full.lib' -Force
 }
 
-function Patch-VvencSources {
+function Patch-Vvenc {
     param([string]$MsysExe)
 
     $patchScript = @'
@@ -1173,7 +1173,7 @@ function Build-Vvenc {
         exit 1
     }
     Push-Location vvenc
-    Patch-VvencSources -MsysExe $MsysExe
+    Patch-Vvenc -MsysExe $MsysExe
     if (Test-Path build) { Remove-Item -Recurse -Force build }
     if (Test-Path lib) { Remove-Item -Recurse -Force lib }
     $cmakeArgs = @('-B', 'build', '-G', 'Ninja',
@@ -1199,7 +1199,7 @@ function Build-Vvenc {
     Copy-Item 'vvenc\lib\release-static\vvenc.lib' 'lib\vvenc.lib' -Force
 }
 
-function Patch-VvdecSources {
+function Patch-Vvdec {
     param([string]$MsysExe)
 
     $patchScript = @'
@@ -1261,7 +1261,7 @@ function Build-Vvdec {
         exit 1
     }
     Push-Location vvdec
-    Patch-VvdecSources -MsysExe $MsysExe
+    Patch-Vvdec -MsysExe $MsysExe
     if (Test-Path build) { Remove-Item -Recurse -Force build }
     if (Test-Path lib) { Remove-Item -Recurse -Force lib }
     $cmakeArgs = @('-B', 'build', '-G', 'Ninja',
