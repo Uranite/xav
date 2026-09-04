@@ -535,7 +535,7 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
     println!("cargo:rustc-link-lib=legacy_stdio_definitions");
     #[cfg(all(feature = "vvenc", feature = "vship"))]
     println!("cargo:rustc-link-lib=static=vvdec");
-    #[cfg(not(feature = "cuda"))]
+    #[cfg(all(feature = "vship", not(feature = "cuda"), not(feature = "amd")))]
     println!("cargo:rustc-link-lib=vulkan-1");
 
     #[cfg(feature = "vship")]
