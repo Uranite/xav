@@ -298,9 +298,10 @@ function Install-Dependencies {
         if (-not (Test-Path "$llvmBin\clang++.exe")) { Confirm-Install "LLVM" "LLVM.LLVM" }
     }
 
-    $nasmpath = "$env:ProgramFiles\NASM"
+    $nasmPaths = @("$env:ProgramFiles\NASM", "$env:LOCALAPPDATA\bin\NASM")
     if (-not (Assert-Command 'nasm')) {
-        if (-not (Test-Path "$nasmpath\nasm.exe")) { Confirm-Install "NASM" "NASM.NASM" }
+        $nasmFound = $nasmPaths | Where-Object { Test-Path "$_\nasm.exe" } | Select-Object -First 1
+        if (-not $nasmFound) { Confirm-Install "NASM" "NASM.NASM" }
     }
 
     Update-SessionEnvironment
@@ -319,6 +320,11 @@ function Install-Dependencies {
     rustup default nightly | Out-Host
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] Failed to set Rust toolchain to nightly." -ForegroundColor Red; exit 1
+    }
+    Write-Host "[INFO] Ensuring rust-src component (required for build-std)..." -ForegroundColor Cyan
+    rustup component add rust-src --toolchain nightly | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to add rust-src component." -ForegroundColor Red; exit 1
     }
 
     if ($VshipBackend -eq 'vulkan') {
@@ -1212,22 +1218,6 @@ function Build-Avm {
 
 function Build-Xav {
     param([string]$Backend, [string]$SvtChoice, [bool]$enableTQ, [bool]$enableAvm)
-    $env:RUSTFLAGS = @(
-        '-C', 'debuginfo=0',
-        '-C', 'target-cpu=native',
-        '-C', 'opt-level=3',
-        '-C', 'codegen-units=1',
-        '-C', 'strip=symbols',
-        '-C', 'panic=abort',
-        '-C', 'linker=lld-link',
-        '-C', 'lto=fat',
-        '-C', 'embed-bitcode=yes',
-        '-Z', 'dylib-lto',
-        '-Z', 'panic_abort_tests',
-        '-C', 'link-arg=/OPT:REF',
-        '-C', 'link-arg=/OPT:ICF'
-    ) -join ' '
-
     $features = @()
     if ($enableAvm) { $features += "avm" }
     if ($enableTQ) {
@@ -1250,7 +1240,7 @@ function Build-Xav {
     }
 
     Write-Host ""
-    if (-not (Test-Path 'target\release')) { New-Item -ItemType Directory 'target\release' | Out-Null }
+    if (-not (Test-Path 'target\x86_64-pc-windows-msvc\release')) { New-Item -ItemType Directory 'target\x86_64-pc-windows-msvc\release' | Out-Null }
 }
 
 # main
@@ -1311,6 +1301,7 @@ else {
 if ($NoPrompt) {
     $avmChoice = if ($EnableAvm) { 'Y' } else { 'N' }
 } else {
+    Write-Host ""
     Write-Host "[PROMPT] Compile with avm feature?" -ForegroundColor Yellow
     $avmChoice = Read-Host "Enter choice (Y/N) [Default: Y]"
     if (-not $avmChoice) { $avmChoice = 'Y' }
