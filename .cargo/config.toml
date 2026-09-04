@@ -22,7 +22,7 @@ rustflags = [
 ]
 
 [unstable]
-build-std = ["core", "alloc"]
+build-std = ["std"]
 
 [alias]
 b-static-nvidia = [
@@ -89,7 +89,8 @@ c-static-amd = [
 
 d-static-amd = [
     "build",
-    "--features", "static,vship,amd",
+    "--no-default-features",
+    "--features", "vship,amd,avm",
     "--config",
     "build.rustflags=['-C', 'debuginfo=2', '-C', 'target-cpu=native', '-C', 'force-frame-pointers=yes', '-C', 'linker=lld-link', '-C', 'target-feature=+crt-static']"
 ]
@@ -123,7 +124,8 @@ c-static-vulkan = [
 
 d-static-vulkan = [
     "build",
-    "--features", "static,vship",
+    "--no-default-features",
+    "--features", "vship,avm",
     "--config",
     "build.rustflags=['-C', 'debuginfo=2', '-C', 'target-cpu=native', '-C', 'force-frame-pointers=yes', '-C', 'linker=lld-link', '-C', 'target-feature=+crt-static']"
 ]
