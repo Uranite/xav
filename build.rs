@@ -529,6 +529,12 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
     println!("cargo:rustc-link-lib=static=SvtAv1Enc");
     #[cfg(feature = "avm")]
     println!("cargo:rustc-link-lib=static=avm_full");
+    #[cfg(feature = "vvenc")]
+    println!("cargo:rustc-link-lib=static=vvenc");
+    #[cfg(feature = "vvenc")]
+    println!("cargo:rustc-link-lib=legacy_stdio_definitions");
+    #[cfg(all(feature = "vvenc", feature = "vship"))]
+    println!("cargo:rustc-link-lib=static=vvdec");
     #[cfg(not(feature = "cuda"))]
     println!("cargo:rustc-link-lib=vulkan-1");
 

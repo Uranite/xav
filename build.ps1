@@ -4,6 +4,7 @@ param (
     [switch]$ForceRebuild,
     [switch]$EnableTQ,
     [switch]$EnableAvm,
+    [switch]$EnableVvenc,
     [string]$Backend = "cuda",
     [int]$SvtVariantId = 1,
     [int]$ArchChoiceId = 1,
@@ -1216,10 +1217,321 @@ function Build-Avm {
     Copy-Item 'avm\build\avm_full.lib' 'lib\avm_full.lib' -Force
 }
 
+function Patch-VvencSources {
+    $file = 'CMakeLists.txt'
+    $content = (Get-Content -Raw $file).Replace("`r`n", "`n")
+    $content = $content.Replace('set( CMAKE_POSITION_INDEPENDENT_CODE TRUE )', 'set( CMAKE_POSITION_INDEPENDENT_CODE FALSE )')
+    $content = $content.Replace('set( CMAKE_CXX_STANDARD 14 )', 'set( CMAKE_CXX_STANDARD 20 )')
+    Set-Content -Path $file -Value $content -NoNewline
+
+    $file = 'source\Lib\vvenc\vvencimpl.cpp'
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
+    $kept = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $lines) {
+        if ($l.Contains('setSIMDExtension( nullptr );')) { continue }
+        if ($l.Contains('m_cEncoderInfo = createEncoderInfoStr();')) { continue }
+        if ($l.Contains('m_cVVEncCfgExt = *config;')) { continue }
+        if ($l.Contains('malloc_trim(0);')) { continue }
+        $kept.Add($l)
+    }
+    $lines = $kept
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].Contains('if ( vvenc_init_config_parameter(&m_cVVEncCfg) )')) {
+            $lines[$i] = $lines[$i].Replace('if ( vvenc_init_config_parameter(&m_cVVEncCfg) )', 'if ( !m_cVVEncCfg.m_configDone && vvenc_init_config_parameter(&m_cVVEncCfg) )')
+        }
+        if ($lines[$i].Contains('! xConvertVerifyYUVBuffer( pcYUVBuffer )')) {
+            $lines[$i] = $lines[$i].Replace('! xConvertVerifyYUVBuffer( pcYUVBuffer )', 'false')
+        }
+        $lines[$i] = $lines[$i].Replace('m_nalUnitData.str().c_str()', 'm_nalUnitData.view().data()')
+        $lines[$i] = $lines[$i].Replace('m_nalUnitData.str().size()', 'm_nalUnitData.view().size()')
+    }
+    if ([string]::Join("`n", $lines) -notmatch 'false && !m_bInitialized') {
+        $startIdx = -1
+        $endIdx = -1
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($startIdx -lt 0 -and $lines[$i].StartsWith('int VVEncImpl::encode(')) { $startIdx = $i }
+            elseif ($startIdx -ge 0 -and $lines[$i] -eq '  int iRet= VVENC_OK;') { $endIdx = $i; break }
+        }
+        if ($startIdx -ge 0 -and $endIdx -ge 0) {
+            for ($i = $startIdx; $i -le $endIdx; $i++) {
+                if ($lines[$i] -match '^  if\(') { $lines[$i] = $lines[$i] -replace '^  if\(', '  if( false && ' }
+            }
+        }
+        $startIdx = -1
+        $endIdx = -1
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($startIdx -lt 0 -and $lines[$i].StartsWith('    if( m_eState == INTERNAL_STATE_FLUSHING ) { m_cErrorString = "encoder already received flush indication')) { $startIdx = $i }
+            elseif ($startIdx -ge 0 -and $lines[$i] -eq '    if ( false )') { $endIdx = $i; break }
+        }
+        if ($startIdx -ge 0 -and $endIdx -ge 0) {
+            for ($i = $startIdx; $i -le $endIdx; $i++) {
+                if ($lines[$i] -match '^    if\(') { $lines[$i] = $lines[$i] -replace '^    if\(', '    if( false && ' }
+            }
+        }
+    }
+    Set-Content -Path $file -Value ([string]::Join("`n", $lines)) -NoNewline
+
+    $file = 'source\Lib\vvenc\vvencimpl.h'
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
+    $kept = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $lines) {
+        if ($l.Contains('m_cVVEncCfgExt')) { continue }
+        $kept.Add($l)
+    }
+    Set-Content -Path $file -Value ([string]::Join("`n", $kept)) -NoNewline
+
+    $file = 'source\Lib\vvenc\vvenc.cpp'
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
+    $dropped = @(
+        '  accessUnit->cts             = 0;',
+        '  accessUnit->dts             = 0;',
+        '  accessUnit->ctsValid        = false;',
+        '  accessUnit->dtsValid        = false;',
+        '  accessUnit->sliceType       = VVENC_NUMBER_OF_SLICE_TYPES;',
+        '  accessUnit->refPic          = false;',
+        '  accessUnit->temporalLayer   = 0;',
+        '  accessUnit->poc             = 0;',
+        '  accessUnit->status          = 0;'
+    )
+    $kept = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $lines) {
+        if ($l.Contains('memset( accessUnit->infoString, 0, sizeof( accessUnit->infoString ) );')) { continue }
+        if ($l.Contains('accessUnit->infoString[0]')) { continue }
+        if ($dropped -contains $l) { continue }
+        $kept.Add($l)
+    }
+    $lines = $kept
+    $startIdx = -1
+    $endIdx = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($startIdx -lt 0 -and $lines[$i].StartsWith('VVENC_DECL void vvenc_accessUnit_reset')) { $startIdx = $i }
+        elseif ($startIdx -ge 0 -and $lines[$i].StartsWith('}')) { $endIdx = $i; break }
+    }
+    if ($startIdx -ge 0 -and $endIdx -ge 0) {
+        for ($i = $startIdx; $i -le $endIdx; $i++) {
+            if ($lines[$i] -eq '  if( nullptr == accessUnit )') { $lines[$i] = '  if( false )'; break }
+        }
+    }
+    Set-Content -Path $file -Value ([string]::Join("`n", $lines)) -NoNewline
+
+    $file = 'source\Lib\vvenc\vvencCfg.cpp'
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -eq '  if ( ! bflag )') { $lines[$i] = '  if ( true )' }
+    }
+    Set-Content -Path $file -Value ([string]::Join("`n", $lines)) -NoNewline
+
+    $file = 'source\Lib\EncoderLib\EncGOP.cpp'
+    $content = (Get-Content -Raw $file).Replace("`r`n", "`n")
+    $content = $content.Replace('m_nalUnitData.str().c_str()', 'm_nalUnitData.view().data()')
+    $content = $content.Replace('m_nalUnitData.str().size()', 'm_nalUnitData.view().size()')
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $content.Split("`n")) { $lines.Add($l) }
+    $kept = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $lines) {
+        if ($l.Contains('xPrintPictureInfo ( pic, au, digestStr, m_pcEncCfg->m_printFrameMSE, isEncodeLtRef );')) { continue }
+        $kept.Add($l)
+    }
+    Set-Content -Path $file -Value ([string]::Join("`n", $kept)) -NoNewline
+
+    $file = 'source\Lib\EncoderLib\EncPicture.cpp'
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
+    $kept = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $lines) {
+        if ($l.Contains('xCalcDistortion( pic, *slice->sps );')) { continue }
+        $kept.Add($l)
+    }
+    Set-Content -Path $file -Value ([string]::Join("`n", $kept)) -NoNewline
+
+    $file = 'source\Lib\CommonLib\TypeDef.h'
+    $content = (Get-Content -Raw $file).Replace("`r`n", "`n")
+    $content = $content.Replace('#define CHECK(c,x)          if(c){ THROW(x); }', '#define CHECK(c,x)')
+    Set-Content -Path $file -Value $content -NoNewline
+}
+
+function Build-Vvenc {
+    param([bool]$NoPrompt)
+    if (Test-Path 'lib\vvenc.lib') {
+        if ($NoPrompt) {
+            $choice = if ($ForceRebuild) { 'Y' } else { 'N' }
+        }
+        else {
+            Write-Host ""
+            Write-Host "[PROMPT] vvenc is already compiled." -ForegroundColor Yellow
+            $choice = Read-Host "Do you want to update and recompile vvenc? (Y/N) [Default: N]"
+        }
+        if ($choice -notmatch '^[Yy]') {
+            Write-Host "[INFO] Skipping vvenc compilation..." -ForegroundColor Cyan
+            return
+        }
+    }
+    if (Test-Path 'vvenc') {
+        Push-Location vvenc
+        git reset --hard
+        git pull
+        Pop-Location
+    }
+    else { git clone --depth 1 https://github.com/fraunhoferhhi/vvenc }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to clone https://github.com/fraunhoferhhi/vvenc into vvenc." -ForegroundColor Red
+        exit 1
+    }
+    Push-Location vvenc
+    Patch-VvencSources
+    if (Test-Path build) { Remove-Item -Recurse -Force build }
+    if (Test-Path lib) { Remove-Item -Recurse -Force lib }
+    $cmakeArgs = @('-B', 'build', '-G', 'Ninja',
+        '-DCMAKE_BUILD_TYPE=Release',
+        '-DCMAKE_C_COMPILER=clang',
+        '-DCMAKE_CXX_COMPILER=clang++',
+        '-DCMAKE_C_FLAGS=-flto -O3 -DNDEBUG -march=native',
+        '-DCMAKE_CXX_FLAGS=-flto -O3 -DNDEBUG -march=native',
+        '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
+        '-DBUILD_SHARED_LIBS=OFF',
+        '-DVVENC_ENABLE_WERROR=OFF',
+        '-DVVENC_ENABLE_INSTALL=OFF',
+        '-DVVENC_ENABLE_LINK_TIME_OPT=OFF',
+        '-DVVENC_ENABLE_UNSTABLE_API=OFF',
+        '-DVVENC_ENABLE_TRACING=OFF')
+    Invoke-Step "Configuring VVenC" { cmake @cmakeArgs }
+    Invoke-Step "Building VVenC" { ninja -C build vvenc }
+    if (-not (Test-Path 'lib\release-static\vvenc.lib')) {
+        Write-Host "[ERROR] lib\release-static\vvenc.lib not found after VVenC build." -ForegroundColor Red
+        exit 1
+    }
+    Pop-Location
+    Copy-Item 'vvenc\lib\release-static\vvenc.lib' 'lib\vvenc.lib' -Force
+}
+
+function Patch-VvdecSources {
+    # CMakeLists.txt: static link like Linux (PIC off), C++20
+    $file = 'CMakeLists.txt'
+    $content = (Get-Content -Raw $file).Replace("`r`n", "`n")
+    $content = $content.Replace('set( CMAKE_POSITION_INDEPENDENT_CODE TRUE )', 'set( CMAKE_POSITION_INDEPENDENT_CODE FALSE )')
+    $content = $content.Replace('set( CMAKE_CXX_STANDARD 14 )', 'set( CMAKE_CXX_STANDARD 20 )')
+    Set-Content -Path $file -Value $content -NoNewline
+
+    $file = 'source\Lib\vvdec\vvdecimpl.cpp'
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($l in ((Get-Content -Raw $file).Replace("`r`n", "`n")).Split("`n")) { $lines.Add($l) }
+    if ([string]::Join("`n", $lines) -notmatch 'false && !m_bInitialized') {
+        $startIdx = -1
+        $endIdx = -1
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($startIdx -lt 0 -and $lines[$i].StartsWith('int VVDecImpl::decode(')) { $startIdx = $i }
+            elseif ($startIdx -ge 0 -and $lines[$i].Contains('not supported feature detected')) { $endIdx = $i; break }
+        }
+        if ($startIdx -ge 0 -and $endIdx -ge 0) {
+            for ($i = $startIdx; $i -le $endIdx; $i++) {
+                if ($lines[$i] -match '^  if\(') { $lines[$i] = $lines[$i] -replace '^  if\(', '  if( false && ' }
+            }
+        }
+        $startIdx = -1
+        $endIdx = -1
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($startIdx -lt 0 -and $lines[$i] -eq '  if( !rcAccessUnit.payload )') { $startIdx = $i }
+            elseif ($startIdx -ge 0 -and $lines[$i] -eq '  int iRet = VVDEC_OK;') { $endIdx = $i; break }
+        }
+        if ($startIdx -ge 0 -and $endIdx -ge 0) {
+            for ($i = $startIdx; $i -le $endIdx; $i++) {
+                if ($lines[$i] -match '^  if\(') { $lines[$i] = $lines[$i] -replace '^  if\(', '  if( false && ' }
+            }
+        }
+    }
+    # Annex-B start-code scan replaced with single-AU fast path (markers vanish: naturally idempotent)
+    $startIdx = -1
+    $endIdx = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -eq '      bool bStartCodeFound = false;') { $startIdx = $i }
+        elseif ($startIdx -ge 0 -and $lines[$i] -eq '      iAUEndPosVec.push_back( iLastPos );') { $endIdx = $i; break }
+    }
+    if ($startIdx -ge 0 -and $endIdx -ge 0) {
+        $lines.RemoveRange($startIdx, $endIdx - $startIdx + 1)
+        $lines.InsertRange($startIdx, [string[]]@(
+            '      const size_t iStartCodeSizeVec[1] = { rcAccessUnit.payload[2] == 1 ? (size_t)3 : (size_t)4 };',
+            '      const size_t iStartCodePosVec[1] = { iStartCodeSizeVec[0] };',
+            '      int iLastPos = rcAccessUnit.payloadUsedSize;',
+            '      while( iLastPos > 0 && rcAccessUnit.payload[iLastPos-1] == 0 )',
+            '      {',
+            '        iLastPos--;',
+            '      }',
+            '      const size_t iAUEndPosVec[1] = { (size_t)iLastPos };'))
+    }
+    $content = [string]::Join("`n", $lines)
+    $content = $content.Replace('!iStartCodePosVec.empty() && iStartCodePosVec[0] != iStartCodeSizeVec[0]', 'false')
+    $content = $content.Replace('iAU < iStartCodePosVec.size()', 'iAU < 1')
+    Set-Content -Path $file -Value $content -NoNewline
+
+    $file = 'source\Lib\DecoderLib\DecLib.cpp'
+    $content = (Get-Content -Raw $file).Replace("`r`n", "`n")
+    $content = $content.Replace('parserFrameDelay = std::min<int>( ( numDecThreads * DEFAULT_PARSE_DELAY_FACTOR ) >> 4, DEFAULT_PARSE_DELAY_MAX );', 'parserFrameDelay = (int) m_decLibRecon.size();')
+    Set-Content -Path $file -Value $content -NoNewline
+}
+
+function Build-Vvdec {
+    param([bool]$NoPrompt)
+    if (Test-Path 'lib\vvdec.lib') {
+        if ($NoPrompt) {
+            $choice = if ($ForceRebuild) { 'Y' } else { 'N' }
+        }
+        else {
+            Write-Host ""
+            Write-Host "[PROMPT] vvdec is already compiled." -ForegroundColor Yellow
+            $choice = Read-Host "Do you want to update and recompile vvdec? (Y/N) [Default: N]"
+        }
+        if ($choice -notmatch '^[Yy]') {
+            Write-Host "[INFO] Skipping vvdec compilation..." -ForegroundColor Cyan
+            return
+        }
+    }
+    if (Test-Path 'vvdec') {
+        Push-Location vvdec
+        git reset --hard
+        git pull
+        Pop-Location
+    }
+    else { git clone --depth 1 https://github.com/fraunhoferhhi/vvdec }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to clone https://github.com/fraunhoferhhi/vvdec into vvdec." -ForegroundColor Red
+        exit 1
+    }
+    Push-Location vvdec
+    Patch-VvdecSources
+    if (Test-Path build) { Remove-Item -Recurse -Force build }
+    if (Test-Path lib) { Remove-Item -Recurse -Force lib }
+    $cmakeArgs = @('-B', 'build', '-G', 'Ninja',
+        '-DCMAKE_BUILD_TYPE=Release',
+        '-DCMAKE_C_COMPILER=clang',
+        '-DCMAKE_CXX_COMPILER=clang++',
+        '-DCMAKE_C_FLAGS=-flto -O3 -DNDEBUG -march=native',
+        '-DCMAKE_CXX_FLAGS=-flto -O3 -DNDEBUG -march=native',
+        '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
+        '-DBUILD_SHARED_LIBS=OFF',
+        '-DVVDEC_LIBRARY_ONLY=ON',
+        '-DVVDEC_ENABLE_WERROR=OFF',
+        '-DVVDEC_ENABLE_LINK_TIME_OPT=OFF',
+        '-DVVDEC_ENABLE_UNSTABLE_API=OFF',
+        '-DVVDEC_ENABLE_TRACING=OFF')
+    Invoke-Step "Configuring VVdeC" { cmake @cmakeArgs }
+    Invoke-Step "Building VVdeC" { ninja -C build vvdec }
+    if (-not (Test-Path 'lib\release-static\vvdec.lib')) {
+        Write-Host "[ERROR] lib\release-static\vvdec.lib not found after VVdeC build." -ForegroundColor Red
+        exit 1
+    }
+    Pop-Location
+    Copy-Item 'vvdec\lib\release-static\vvdec.lib' 'lib\vvdec.lib' -Force
+}
+
 function Build-Xav {
-    param([string]$Backend, [string]$SvtChoice, [bool]$enableTQ, [bool]$enableAvm)
+    param([string]$Backend, [string]$SvtChoice, [bool]$enableTQ, [bool]$enableAvm, [bool]$enableVvenc)
     $features = @()
     if ($enableAvm) { $features += "avm" }
+    if ($enableVvenc) { $features += "vvenc" }
     if ($enableTQ) {
         $features += "vship"
         if ($Backend -eq 'cuda') { $features += "cuda" }
@@ -1308,6 +1620,17 @@ if ($NoPrompt) {
 }
 
 $enableAvm = $avmChoice -ieq 'Y'
+
+if ($NoPrompt) {
+    $vvencChoice = if ($EnableVvenc) { 'Y' } else { 'N' }
+} else {
+    Write-Host ""
+    Write-Host "[PROMPT] Compile with vvenc feature?" -ForegroundColor Yellow
+    $vvencChoice = Read-Host "Enter choice (Y/N) [Default: Y]"
+    if (-not $vvencChoice) { $vvencChoice = 'Y' }
+}
+
+$enableVvenc = $vvencChoice -ieq 'Y'
 
 if ($NoPrompt) {
     $svtChoice = $SvtVariantId.ToString()
@@ -1441,7 +1764,13 @@ Build-FFmpeg -VsPath $vsPath -MsysExe $msysExe -Backend $vshipBackend
 if ($enableAvm) {
     Build-Avm -NoPrompt $NoPrompt
 }
+if ($enableVvenc) {
+    Build-Vvenc -NoPrompt $NoPrompt
+}
+if ($enableVvenc -and $enableTQ) {
+    Build-Vvdec -NoPrompt $NoPrompt
+}
 Build-SvtAv1 -Variant $svtVariant -Dir $svtDir -Branch $svtBranch -Repo $svtRepo -ExtraCFlags $svtExtraCFlags -ArchFlags $svtArchFlags -NoPrompt $NoPrompt
-Build-Xav -Backend $vshipBackend -SvtChoice $svtChoice -enableTQ $enableTQ -enableAvm $enableAvm
+Build-Xav -Backend $vshipBackend -SvtChoice $svtChoice -enableTQ $enableTQ -enableAvm $enableAvm -enableVvenc $enableVvenc
 
 Write-Host "[SUCCESS] Build script finished." -ForegroundColor Green
