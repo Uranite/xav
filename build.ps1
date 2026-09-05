@@ -234,28 +234,17 @@ function Install-VsBuildTools {
 
 function Import-Vcvars {
     param([string]$VsPath, [bool]$VsIncludeV143)
-    $vcvars = Join-Path $VsPath "VC\Auxiliary\Build\vcvarsall.bat"
-    if (-not (Test-Path $vcvars)) {
-        Write-Host "[ERROR] vcvarsall.bat not found at $vcvars" -ForegroundColor Red
+    $devShell = Join-Path $VsPath 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll'
+    if (-not (Test-Path $devShell)) {
+        Write-Host "[ERROR] VsDevShell not found at $devShell" -ForegroundColor Red
         exit 1
     }
 
-    $vcvarsArgs = "x64"
-    if ($VsIncludeV143) { $vcvarsArgs += " -vcvars_ver=14.4" }
+    $devArgs = '-arch=x64'
+    if ($VsIncludeV143) { $devArgs += ' -vcvars_ver=14.4' }
 
-    $envLines = cmd /c "`"$vcvars`" $vcvarsArgs > nul && set"
-    foreach ($line in $envLines) {
-        if ($line -match '^([^=]+)=(.*)$') {
-            $name = $matches[1]
-            $val = $matches[2]
-            if ($name -ieq 'INCLUDE' -or $name -ieq 'LIB' -or $name -ieq 'LIBPATH') {
-                Set-Item "env:$name" $val
-            }
-            elseif ($name -ieq 'PATH') {
-                $env:PATH = $val
-            }
-        }
-    }
+    Import-Module $devShell
+    Enter-VsDevShell -VsInstallPath $VsPath -SkipAutomaticLocation -DevCmdArguments $devArgs
 }
 
 function Install-GpuSdk {
@@ -790,6 +779,24 @@ function Build-Dav1d {
     }
 }
 
+function Patch-FFmpeg {
+    param([string]$MsysExe)
+
+    $patchScript = @'
+#!/bin/sh
+set -e
+grep -q '^disable inline_asm_nonlocal_labels$' configure || sed -i '/^check_optflags -fno-signed-zeros$/a\
+disable inline_asm_nonlocal_labels\
+disable inline_asm_direct_symbol_refs' configure
+'@
+    Set-Content -Path 'patch_ffmpeg.sh' -Value ($patchScript.Replace("`r`n", "`n") + "`n") -Encoding Ascii -NoNewline
+    $unixPath = $PWD.Path -replace '\\', '/'
+    Invoke-Step "Patching FFmpeg (sed)" {
+        & $MsysExe -lc "cd `"$unixPath`" && sh ./patch_ffmpeg.sh"
+    }
+    Remove-Item 'patch_ffmpeg.sh' -Force -ErrorAction SilentlyContinue
+}
+
 function Build-FFmpeg {
     param([string]$VsPath, [string]$MsysExe, [string]$Backend)
     
@@ -814,7 +821,7 @@ function Build-FFmpeg {
         }
         else { git clone --depth 1 https://github.com/FFmpeg/FFmpeg.git }
         Push-Location FFmpeg
-        git apply "..\patch\ffmpeg.patch"
+        Patch-FFmpeg -MsysExe $MsysExe
         Invoke-Step "Building FFmpeg" {
             $llvmBinWin = "C:\Program Files\LLVM\bin"
 
@@ -849,8 +856,6 @@ export PATH="`$(cygpath -u '$llvmBinWin'):`$PATH"
 "@ + "`n" + @'
 export PKG_CONFIG_PATH="$(pwd)/../install/lib/pkgconfig"
 
-# i forgot what this does
-# sed -i 's/-L\*) \[ "$_flags_type" = "link" \] && echo -libpath:${flag#-L} ;;/-L*) [ "$_flags_type" = "link" ] \&\& echo -libpath:${flag#-L} ;; -I*) [ "$_flags_type" = "link" ] || echo $flag ;;/g' configure
 ./configure \
     --disable-all \
     --disable-everything \
@@ -862,7 +867,6 @@ export PKG_CONFIG_PATH="$(pwd)/../install/lib/pkgconfig"
     --ranlib="llvm-ranlib" \
     --strip="llvm-strip" \
     --toolchain="msvc" \
-    --enable-lto="full" \
     --extra-cflags="-flto /clang:-O3 -DNDEBUG -march=native" \
 	--extra-cxxflags="-flto /clang:-O3 -DNDEBUG -march=native" \
     --disable-shared \
