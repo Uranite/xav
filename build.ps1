@@ -74,7 +74,7 @@ function Update-SessionEnvironment {
     }
     $env:PATH = $newPath
 
-    foreach ($var in @('CUDA_PATH', 'HIP_PATH', 'VULKAN_SDK')) {
+    foreach ($var in @('CUDA_PATH', 'HIP_PATH')) {
         $val = [System.Environment]::GetEnvironmentVariable($var, 'Machine')
         if (-not $val) { $val = [System.Environment]::GetEnvironmentVariable($var, 'User') }
         if ($val) { Set-Item "env:$var" $val }
@@ -328,14 +328,6 @@ function Install-Dependencies {
         Write-Host "[ERROR] Failed to add rust-src component." -ForegroundColor Red; exit 1
     }
 
-    if ($VshipBackend -eq 'vulkan') {
-        if (-not $env:VULKAN_SDK) {
-            Write-Host "[INFO] Vulkan SDK is required for the vulkan vship backend." -ForegroundColor Cyan
-            Confirm-Install "Vulkan SDK" "KhronosGroup.VulkanSDK"
-            if (-not $env:VULKAN_SDK) { Write-Host "[ERROR] VULKAN_SDK not found. Try restarting your terminal, or set VULKAN_SDK manually." -ForegroundColor Red; exit 1 }
-        }
-    }
-
     Install-GpuSdk -VshipBackend $VshipBackend -VsIncludeV143 $VsIncludeV143
     $msysExe = Install-Msys2
     $vsPathResult = Install-VsBuildTools -VsIncludeV143 $VsIncludeV143
@@ -396,7 +388,7 @@ function Build-Vship {
                 Invoke-Step "Compiling Vship (Vulkan)" {
                     clang++ -c src/VshipLib.cpp -DVULKANBUILD -DNDEBUG -std=c++17 -O2 -Wall `
                         -Wno-ignored-attributes -Wno-unused-variable -Wno-nullability-completeness `
-                        -Wno-unused-private-field -I include -I "$env:VULKAN_SDK\Include" -o libvship.o
+                        -Wno-unused-private-field -I include -I ..\install\include -o libvship.o
                 }
                 if (Test-Path 'libvship.lib') { Remove-Item 'libvship.lib' }
                 Invoke-Step "Archiving Vship (Vulkan)" { llvm-ar rcs libvship.lib libvship.o }
@@ -1509,14 +1501,14 @@ Import-Vcvars -VsPath $vsPath -VsIncludeV143 $vsIncludeV143
 
 if (-not (Test-Path 'lib')) { New-Item -ItemType Directory 'lib' }
 
+if ($vshipBackend -ne 'cuda') {
+    Build-Vulkan -VsPath $vsPath
+}
 if ($enableTQ) {
     Build-Vship -Backend $vshipBackend -VsIncludeV143 $vsIncludeV143 -VsPath $vsPath
 }
 Build-Dav1d
 Build-Opus
-if ($vshipBackend -ne 'cuda') {
-    Build-Vulkan -VsPath $vsPath
-}
 if ($vshipBackend -eq 'cuda') {
     Build-NvHeaders -MsysExe $msysExe
 }
