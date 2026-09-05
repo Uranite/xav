@@ -188,7 +188,7 @@ function Install-VsBuildTools {
         }
         Write-Host "[INFO] Installing Visual Studio Build Tools with Desktop C++ workload (this may take a while)..." -ForegroundColor Cyan
 
-        $vsWorkloadComponents = "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+        $vsWorkloadComponents = "--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100"
         if ($VsIncludeV143) {
             $vsWorkloadComponents += " --add Microsoft.VisualStudio.ComponentGroup.VC.Tools.143.x86.x64"
         }
@@ -738,9 +738,9 @@ function Build-Dav1d {
         else { git clone --depth 1 https://code.videolan.org/videolan/dav1d.git }
         Push-Location dav1d
         if (-not (Assert-Command 'meson')) {
-            $mesonVersion = '1.10.0'
+            $mesonVersion = '1.12.0'
             $mesonUrl = "https://github.com/mesonbuild/meson/releases/download/$mesonVersion/meson-$mesonVersion-64.msi"
-            $mesonHash = '8328ff3a06ddb58fd20e6330dfbcebe38b386863360738d6bca12037c8b10c99'
+            $mesonHash = 'c35383106327e20795a3c4010d40db0bfe952baf5490584c2535f70899833dce'
             $mesonMsi = "$env:TEMP\meson-$mesonVersion-64.msi"
             $mesonExe = "$env:ProgramFiles\Meson\meson.exe"
 
