@@ -16,31 +16,50 @@ $ErrorActionPreference = 'Stop'
 
 $COMMON_FLAGS = "-flto -O3 -DNDEBUG -march=native"
 
-function Install-Cuda129 {
-    $url = 'https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_576.57_windows.exe'
-    $sha256 = 'F0CA7CC7B4CEA2FAC2C4951819D2A9CAEA31E04000E9110E2048719525F8EA0E'
-    $installer = "$env:TEMP\cuda_12.9.1_windows.exe"
-    $logPath = "$env:TEMP\cuda_12.9.1_install.log"
+$CudaReleases = @{
+    '12.9' = @{
+        Version    = '12.9.1'
+        Url        = 'https://developer.download.nvidia.com/compute/cuda/12.9.1/network_installers/cuda_12.9.1_windows_network.exe'
+        Sha256     = 'DE45C336AB4E9825018B546357DC9DE5DED9F89C4F5200EF52B8EEAC3B1B4072'
+        Components = @('nvcc_12.9', 'cudart_12.9')
+    }
+    '13.3' = @{
+        Version    = '13.3.1'
+        Url        = 'https://developer.download.nvidia.com/compute/cuda/13.3.1/network_installers/cuda_13.3.1_windows_network.exe'
+        Sha256     = '0A4964DB02D01A80F897605B0CB2C18FDDAF277C44940A0F3436301A577B3C57'
+        Components = @('nvcc_13.3', 'cudart_13.3', 'crt_13.3', 'nvvm_13.3')
+    }
+}
 
-    Write-Host "[INFO] Downloading CUDA Toolkit 12.9.1 (this may take a while)..." -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $url -OutFile $installer
+function Install-CudaMinimal {
+    param([string]$Version, [string]$Url, [string]$Sha256, [string[]]$Components)
+    $mm = ($Version -split '\.')[0..1] -join '.'
+    $installer = "$env:TEMP\cuda_${Version}_network.exe"
+    $logPath = "$env:TEMP\cuda_${Version}_install.log"
+
+    Write-Host "[INFO] Downloading CUDA Toolkit $Version network installer (minimal stub, ~16 MB)..." -ForegroundColor Cyan
+    Invoke-WebRequest -Uri $Url -OutFile $installer
 
     Write-Host "[INFO] Verifying installer checksum..." -ForegroundColor Cyan
     $actual = (Get-FileHash $installer -Algorithm SHA256).Hash
-    if ($actual -ne $sha256) {
-        Write-Host "[ERROR] CUDA installer checksum mismatch. Expected $sha256, got $actual." -ForegroundColor Red
+    if ($actual -ne $Sha256) {
+        Write-Host "[ERROR] CUDA installer checksum mismatch. Expected $Sha256, got $actual." -ForegroundColor Red
         exit 1
     }
 
-    Write-Host "[INFO] Installing CUDA Toolkit 12.9.1 silently (this may take a while)..." -ForegroundColor Cyan
-    $proc = Start-Process -FilePath $installer -ArgumentList "-y -gm2 -s -n -log:`"$logPath`"" -Wait -PassThru
+    Write-Host "[INFO] Installing CUDA $Version ($($Components -join ', '), no driver)..." -ForegroundColor Cyan
+    $proc = Start-Process -FilePath $installer -ArgumentList "-s $($Components -join ' ') -n -log:`"$logPath`"" -Wait -PassThru
     if ($proc.ExitCode -ne 0) {
-        Write-Host "[ERROR] CUDA 12.9.1 installer failed (exit code $($proc.ExitCode)). Log: $logPath" -ForegroundColor Red
+        Write-Host "[ERROR] CUDA $Version installer failed (exit code $($proc.ExitCode)). Log: $logPath" -ForegroundColor Red
         exit 1
     }
 
     Update-SessionEnvironment
-    Write-Host "[INFO] CUDA Toolkit 12.9.1 installed successfully." -ForegroundColor Green
+    if (-not $env:CUDA_PATH) {
+        $default = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$mm"
+        if (Test-Path "$default\bin\nvcc.exe") { $env:CUDA_PATH = $default }
+    }
+    Write-Host "[INFO] CUDA Toolkit $Version (minimal) installed successfully." -ForegroundColor Green
     Remove-Item -Path $installer -Force -ErrorAction SilentlyContinue
 }
 
@@ -242,16 +261,13 @@ function Import-Vcvars {
 function Install-GpuSdk {
     param([string]$VshipBackend, [bool]$VsIncludeV143)
     if ($VshipBackend -eq 'cuda' -and -not $env:CUDA_PATH) {
-        if (-not $VsIncludeV143) {
-            Confirm-Install "NVIDIA CUDA Toolkit 13.3" "Nvidia.CUDA"
-        }
-        else {
-            Write-Host ""
-            Write-Host "[PROMPT] NVIDIA CUDA Toolkit 12.9 is missing." -ForegroundColor Yellow
-            $choice = Read-Host "Do you want to install it? (Y/N) [Default: Y]"
-            if ($choice -ieq 'N') { Write-Host "[ERROR] CUDA Toolkit is required. Exiting." -ForegroundColor Red; exit 1 }
-            Install-Cuda129
-        }
+        $mm = if ($VsIncludeV143) { '12.9' } else { '13.3' }
+        $rel = $CudaReleases[$mm]
+        Write-Host ""
+        Write-Host "[PROMPT] NVIDIA CUDA Toolkit $mm is missing." -ForegroundColor Yellow
+        $choice = Read-Host "Do you want to install it (minimal: $($rel.Components -join ', '))? (Y/N) [Default: Y]"
+        if ($choice -ieq 'N') { Write-Host "[ERROR] CUDA Toolkit is required. Exiting." -ForegroundColor Red; exit 1 }
+        Install-CudaMinimal -Version $rel.Version -Url $rel.Url -Sha256 $rel.Sha256 -Components $rel.Components
         if (-not $env:CUDA_PATH) {
             Write-Host "[ERROR] CUDA_PATH still not set after install. Try restarting your terminal, or set CUDA_PATH manually." -ForegroundColor Red
             exit 1
@@ -1449,7 +1465,6 @@ $env:CXX = 'clang++'
 # Latest CUDA for Turing and newer
 # CUDA 12.9 for Pascal and older
 $vsIncludeV143 = $false
-$cudaWingetId = 'Nvidia.CUDA'
 
 if ($vshipBackend -eq 'cuda') {
     $gpuName = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
@@ -1459,7 +1474,6 @@ if ($vshipBackend -eq 'cuda') {
     if (-not $gpuName) {
         Write-Host "[WARNING] Could not detect NVIDIA GPU. Defaulting to CUDA 12.9 with MSVC v143." -ForegroundColor Yellow
         $vsIncludeV143 = $true
-        $cudaWingetId = $null
     }
 
     Write-Host "[INFO] Detected GPU: $gpuName" -ForegroundColor Cyan
@@ -1484,12 +1498,10 @@ if ($vshipBackend -eq 'cuda') {
     if ($isTuringOrNewer) {
         Write-Host "[INFO] Turing or newer detected. Using latest CUDA version." -ForegroundColor Cyan
         $vsIncludeV143 = $false
-        $cudaWingetId = 'Nvidia.CUDA'
     }
     else {
         Write-Host "[INFO] Pascal or older detected. Using CUDA 12.9 with MSVC v143" -ForegroundColor Cyan
         $vsIncludeV143 = $true
-        $cudaWingetId = $null
     }
 }
 
