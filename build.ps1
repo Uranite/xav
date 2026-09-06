@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+#Requires -Version 5.1
 [CmdletBinding()]
 param (
     [switch]$ForceRebuild,
@@ -38,7 +38,7 @@ function Install-CudaMinimal {
     $logPath = "$env:TEMP\cuda_${Version}_install.log"
 
     Write-Host "[INFO] Downloading CUDA Toolkit $Version network installer (minimal stub, ~16 MB)..." -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $Url -OutFile $installer
+    Invoke-WebRequest -Uri $Url -OutFile $installer -UseBasicParsing
 
     Write-Host "[INFO] Verifying installer checksum..." -ForegroundColor Cyan
     $actual = (Get-FileHash $installer -Algorithm SHA256).Hash
@@ -103,6 +103,17 @@ function Update-SessionEnvironment {
 function Assert-Command {
     param([string]$Cmd)
     return [bool](Get-Command $Cmd -ErrorAction SilentlyContinue)
+}
+
+function Test-CpuFlag {
+    param([string]$MsysExe, [string]$Flag)
+    try {
+        & $MsysExe -lc "grep '^flags' /proc/cpuinfo | grep -q -w '$Flag'" 2>$null
+        return ($LASTEXITCODE -eq 0)
+    }
+    catch {
+        return $false
+    }
 }
 
 function Confirm-Install {
@@ -271,7 +282,7 @@ function Install-GpuSdk {
         
         Write-Host "[INFO] Downloading AMD HIP SDK..." -ForegroundColor Cyan
         $hipInstaller = "$env:TEMP\AMD-HIP-Setup.exe"
-        Invoke-WebRequest -Uri "https://download.amd.com/developer/eula/rocm-hub/AMD-Software-PRO-Edition-26.Q1-Win11-For-HIP.exe" -OutFile $hipInstaller
+        Invoke-WebRequest -Uri "https://download.amd.com/developer/eula/rocm-hub/AMD-Software-PRO-Edition-26.Q1-Win11-For-HIP.exe" -OutFile $hipInstaller -UseBasicParsing
         Write-Host "[INFO] Installing AMD HIP SDK (this may take a while)..." -ForegroundColor Cyan
         Start-Process -FilePath $hipInstaller -ArgumentList '-install' -Wait
         Update-SessionEnvironment
@@ -489,7 +500,7 @@ sed -i 's|const size_t min_stack_size = 1024 \* 1024;|const size_t min_stack_siz
 '@
     }
 
-    if ([System.Runtime.Intrinsics.X86.Avx2]::IsSupported) {
+    if (Test-CpuFlag -MsysExe $MsysExe -Flag 'avx2') {
         $patchScript += @'
 
 sed -i 's/\r//g' Source/API/EbConfigMacros.h
@@ -523,7 +534,7 @@ function Build-SvtAv1 {
         }
     }
 
-    $avx512Supported = [System.Runtime.Intrinsics.X86.Avx512F]::IsSupported
+    $avx512Supported = Test-CpuFlag -MsysExe $MsysExe -Flag 'avx512f'
     $svtAvx512Flag = if ($avx512Supported) { 'ON' } else { 'OFF' }
     Write-Host "[INFO] Detected AVX512 support: $avx512Supported. SVT-AV1 will be built with -DENABLE_AVX512=$svtAvx512Flag." -ForegroundColor Cyan
 
@@ -574,7 +585,7 @@ function Build-SvtAv1 {
 
         if (-not (Test-Path "..\$clipFile")) {
             Write-Host "[INFO] Downloading PGO clip..." -ForegroundColor Cyan
-            Invoke-WebRequest -Uri $clipUrl -OutFile "..\$clipFile"
+            Invoke-WebRequest -Uri $clipUrl -OutFile "..\$clipFile" -UseBasicParsing
         }
 
         $actualHash = (Get-FileHash "..\$clipFile" -Algorithm SHA256).Hash
@@ -742,7 +753,7 @@ function Build-Dav1d {
             }
 
             Write-Host "[INFO] Downloading Meson $mesonVersion..." -ForegroundColor Cyan
-            Invoke-WebRequest -Uri $mesonUrl -OutFile $mesonMsi
+            Invoke-WebRequest -Uri $mesonUrl -OutFile $mesonMsi -UseBasicParsing
 
             $actual = (Get-FileHash $mesonMsi -Algorithm SHA256).Hash
             if ($actual -ne $mesonHash.ToUpper()) {
