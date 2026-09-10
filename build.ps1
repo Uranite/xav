@@ -1329,9 +1329,10 @@ function Build-Xav {
     }
 
     $featureArg = $features -join ","
+    $releaseRustflags = "build.rustflags=['-C', 'debuginfo=0', '-C', 'target-cpu=native', '-C', 'opt-level=3', '-C', 'codegen-units=1', '-C', 'strip=symbols', '-C', 'panic=immediate-abort', '-Z', 'unstable-options', '-C', 'linker=lld-link', '-C', 'lto=thin', '-C', 'embed-bitcode=yes', '-C', 'default-linker-libraries=yes', '-C', 'relocation-model=static', '-Z', 'panic_abort_tests', '-Z', 'location-detail=none', '-Z', 'fmt-debug=none', '-C', 'target-feature=+crt-static', '-C', 'link-arg=/OPT:REF', '-C', 'link-arg=/OPT:ICF']"
     Invoke-Step "Cargo build ($Backend)" {
         cargo update
-        cargo build --release --no-default-features --features "$featureArg"
+        cargo build --release --no-default-features --features "$featureArg" --config $releaseRustflags
     }
 
     Write-Host ""

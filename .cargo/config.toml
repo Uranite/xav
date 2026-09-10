@@ -1,23 +1,8 @@
 [build]
 target = "x86_64-pc-windows-msvc"
 rustflags = [
-    "-C", "debuginfo=0",
     "-C", "target-cpu=native",
-    "-C", "opt-level=3",
-    "-C", "codegen-units=1",
-    "-C", "strip=symbols",
-    "-C", "panic=immediate-abort",
-    "-Z", "unstable-options",
-    "-Z", "panic_abort_tests",
-    "-Z", "location-detail=none",
-    "-Z", "fmt-debug=none",
     "-C", "linker=lld-link",
-    "-C", "lto=thin",
-    "-C", "embed-bitcode=yes",
-    "-C", "default-linker-libraries=yes",
-    "-C", "relocation-model=static",
-    "-C", "link-arg=/OPT:REF",
-    "-C", "link-arg=/OPT:ICF",
     "-C", "target-feature=+crt-static",
 ]
 
