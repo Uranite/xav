@@ -421,7 +421,7 @@ function Patch-SvtAv1 {
     param([string]$Variant, [string]$MsysExe)
 
     # should be fixed in mainline/tritium
-    $apply8MbStackPatch = $Variant -notin @('svt-av1-tritium', 'svt-av1-tritium-yis', 'mainline')
+    $apply8MbStackPatch = $Variant -notin @('svt-av1-tritium', 'svt-av1-skibidi', 'mainline')
 
     $patchScript = @'
 #!/bin/sh
@@ -1425,10 +1425,9 @@ Write-Host "  1. svt-av1-hdr       (https://github.com/juliobbv-p/svt-av1-hdr)"
 Write-Host "  2. svt-av1-essential (https://github.com/nekotrix/SVT-AV1-Essential)"
 Write-Host "  3. 5fish             (https://github.com/5fish/svt-av1-psy)"
 Write-Host "  4. svt-av1-tritium   (https://github.com/Uranite/svt-av1-tritium)"
-Write-Host "  5. svt-av1-tritium yis branch [testing only, do not use]   (https://github.com/Uranite/svt-av1-tritium/tree/yis)"
-Write-Host "  6. svt-av1-essential yiss fork [testing only, do not use]  (https://github.com/Uranite/SVT-AV1-Essential)"
-Write-Host "  7. mainline           (https://gitlab.com/AOMediaCodec/SVT-AV1)"
-$svtChoice = Read-Host "Enter choice (1-7) [Default: 1]"
+Write-Host "  5. svt-av1-skibidi   (https://github.com/Uranite/svt-av1-skibidi)"
+Write-Host "  6. mainline          (https://gitlab.com/AOMediaCodec/SVT-AV1)"
+$svtChoice = Read-Host "Enter choice (1-6) [Default: 1]"
     if (-not $svtChoice) { $svtChoice = '1' }
 }
 
@@ -1437,9 +1436,8 @@ switch ($svtChoice) {
     '2' { $svtVariant = 'svt-av1-essential'; $svtRepo = 'https://github.com/nekotrix/SVT-AV1-Essential.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
     '3' { $svtVariant = '5fish'; $svtRepo = 'https://github.com/5fish/svt-av1-psy.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '-DSVT_LOG_QUIET' }
     '4' { $svtVariant = 'svt-av1-tritium'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
-    '5' { $svtVariant = 'svt-av1-tritium-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = 'yis'; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
-    '6' { $svtVariant = 'svt-av1-essential-yis'; $svtRepo = 'https://github.com/Uranite/svt-av1-essential.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
-    '7' { $svtVariant = 'mainline'; $svtRepo = 'https://gitlab.com/AOMediaCodec/SVT-AV1.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
+    '5' { $svtVariant = 'svt-av1-skibidi'; $svtRepo = 'https://github.com/Uranite/svt-av1-skibidi.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
+    '6' { $svtVariant = 'mainline'; $svtRepo = 'https://gitlab.com/AOMediaCodec/SVT-AV1.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
     default {
         Write-Host "[ERROR] Invalid choice." -ForegroundColor Red
         exit 1

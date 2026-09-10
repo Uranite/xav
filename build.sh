@@ -1308,14 +1308,14 @@ ENCODER_FEATS=("avm" "vvenc" "x265" "x264")
 declare -A ENC_ON=()
 for i in "${!ENCODER_FEATS[@]}"; do ENC_ON["${ENCODER_FEATS[i]}"]=0; done
 
-SVT_FORK_NAMES=("hdr" "essential" "mainline" "5fish" "tritium" "tritium yis branch (testing only, do not use)")
+SVT_FORK_NAMES=("hdr" "essential" "mainline" "5fish" "tritium" "skibidi")
 SVT_FORK_URLS=(
         "https://github.com/juliobbv-p/svt-av1-hdr"
         "https://github.com/nekotrix/SVT-AV1-Essential"
         "https://gitlab.com/AOMediaCodec/SVT-AV1"
         "https://github.com/5fish/SVT-AV1"
         "https://github.com/Uranite/SVT-AV1-Tritium"
-        "https://github.com/Uranite/SVT-AV1-Tritium"
+        "https://github.com/Uranite/svt-av1-skibidi"
 )
 SVT_FORK_BRANCHES=(
         ""
@@ -1323,7 +1323,7 @@ SVT_FORK_BRANCHES=(
         ""
         ""
         ""
-        "yis"
+        ""
 )
 
 main() {
