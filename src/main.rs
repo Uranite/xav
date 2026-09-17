@@ -307,7 +307,8 @@ fn print_guide() {
         .replace("{P}", P)
         .replace("{Y}", Y)
         .replace("{C}", C)
-        .replace("{W}", W);
+        .replace("{W}", W)
+        .replace("{N}", N);
 
     #[cfg(unix)]
     if let Ok(mut pager) = Command::new("less")
@@ -318,12 +319,13 @@ fn print_guide() {
     {
         if let Some(mut si) = pager.stdin.take() {
             _ = si.write_all(guide.as_bytes());
+            _ = si.write_all(N.as_bytes());
         }
         _ = pager.wait();
         return;
     }
 
-    print!("{guide}");
+    print!("{guide}{N}");
     _ = stdout().flush();
 }
 
