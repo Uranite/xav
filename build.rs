@@ -183,22 +183,24 @@ fn gpu_win() -> String {
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
         .filter(|s| !s.is_empty())
-        .map(|v| format!("NVIDIA {v}"))
-        .unwrap_or_else(|| {
-            Command::new("powershell")
-                .args([
-                    "-NoProfile",
-                    "-Command",
-                    "Get-CimInstance Win32_VideoController | Select-Object -First 1 | \
-                     ForEach-Object { $_.Name + ' ' + $_.DriverVersion }",
-                ])
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "unknown".to_owned())
-        })
+        .map_or_else(gpu_win_fallback, |v| format!("NVIDIA {v}"))
+}
+
+#[cfg(feature = "vship")]
+fn gpu_win_fallback() -> String {
+    Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_VideoController | Select-Object -First 1 | ForEach-Object { \
+             $_.Name + ' ' + $_.DriverVersion }",
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 #[cfg(feature = "vvenc")]
@@ -643,13 +645,12 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 }
 
 fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
     stamp_versions_win()?;
 
     build_asm()?;
 
-    let mut lib_path = PathBuf::from(&manifest_dir);
-    lib_path.push("lib");
+    let lib_path = PathBuf::from(&manifest_dir).join("lib");
     println!("cargo:rustc-link-search=native={}", lib_path.display());
     println!("cargo:rustc-link-lib=static=opus");
     println!("cargo:rustc-link-lib=static=SvtAv1Enc");
@@ -671,7 +672,7 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
         #[cfg(feature = "amd")]
         match env::var("HIP_PATH") {
             Ok(hip_path) => {
-                let hip_lib_path = std::path::Path::new(&hip_path).join("lib");
+                let hip_lib_path = Path::new(&hip_path).join("lib");
                 println!("cargo:rustc-link-search=native={}", hip_lib_path.display());
             }
             Err(_) => {
@@ -683,7 +684,7 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
         #[cfg(feature = "cuda")]
         match env::var("CUDA_PATH") {
             Ok(cuda_path) => {
-                let cuda_lib_path = std::path::Path::new(&cuda_path).join("lib").join("x64");
+                let cuda_lib_path = Path::new(&cuda_path).join("lib").join("x64");
                 println!("cargo:rustc-link-search=native={}", cuda_lib_path.display());
             }
             Err(_) => {
@@ -695,9 +696,7 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     {
-        let mut ffmpeg_lib_path = PathBuf::from(&manifest_dir);
-        ffmpeg_lib_path.push("ffmpeg");
-        ffmpeg_lib_path.push("lib");
+        let ffmpeg_lib_path = PathBuf::from(&manifest_dir).join("ffmpeg").join("lib");
         println!(
             "cargo:rustc-link-search=native={}",
             ffmpeg_lib_path.display()
@@ -717,7 +716,7 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
             // "bz2",
         ];
         for lib in libs {
-            println!("cargo:rustc-link-lib=static={}", lib);
+            println!("cargo:rustc-link-lib=static={lib}");
         }
     }
     println!("cargo:rustc-link-lib=bcrypt");
