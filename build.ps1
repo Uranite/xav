@@ -5,6 +5,8 @@ param (
     [switch]$EnableTQ,
     [switch]$EnableAvm,
     [switch]$EnableVvenc,
+    [switch]$EnableX265,
+    [switch]$EnableX264,
     [string]$Backend = "cuda",
     [int]$SvtVariantId = 1,
     [int]$ArchChoiceId = 1,
@@ -1310,11 +1312,138 @@ function Build-Vvdec {
     Copy-Item 'vvdec\lib\release-static\vvdec.lib' 'lib\vvdec.lib' -Force
 }
 
+function Build-X265 {
+    param([bool]$NoPrompt, [string]$MsysExe)
+    if (Test-Path 'lib\x265.lib') {
+        if ($NoPrompt) {
+            $choice = if ($ForceRebuild) { 'Y' } else { 'N' }
+        }
+        else {
+            Write-Host ""
+            Write-Host "[PROMPT] x265 is already compiled." -ForegroundColor Yellow
+            $choice = Read-Host "Do you want to update and recompile x265? (Y/N) [Default: N]"
+        }
+        if ($choice -notmatch '^[Yy]') {
+            Write-Host "[INFO] Skipping x265 compilation..." -ForegroundColor Cyan
+            return
+        }
+    }
+    if (Test-Path 'x265_git') {
+        Push-Location x265_git
+        git reset --hard
+        git pull
+        Pop-Location
+    }
+    else { git clone --depth 1 https://bitbucket.org/multicoreware/x265_git }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to clone https://bitbucket.org/multicoreware/x265_git into x265_git." -ForegroundColor Red
+        exit 1
+    }
+    Push-Location x265_git
+    Copy-Item '..\patch\x265.sh' 'source\x265.sh' -Force
+    $unixSource = (Join-Path $PWD 'source') -replace '\\', '/'
+    Invoke-Step "Patching x265 (sed)" {
+        & $MsysExe -lc "cd `"$unixSource`" && sh ./x265.sh"
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] x265 patch failed." -ForegroundColor Red
+        Pop-Location
+        exit 1
+    }
+    if (Test-Path 'source\build-xav') { Remove-Item -Recurse -Force 'source\build-xav' }
+    $cmakeArgs = @('-S', 'source', '-B', 'source\build-xav', '-G', 'Ninja',
+        '-DCMAKE_BUILD_TYPE=Release',
+        '-DCMAKE_C_COMPILER=clang-cl',
+        '-DCMAKE_CXX_COMPILER=clang-cl',
+        '-DCMAKE_C_FLAGS=/clang:-O3 -DNDEBUG -march=native',
+        '-DCMAKE_CXX_FLAGS=/clang:-O3 -DNDEBUG -march=native /EHsc',
+        '-DSTATIC_LINK_CRT=ON',
+        '-DHIGH_BIT_DEPTH=ON',
+        '-DMAIN12=OFF',
+        '-DEXPORT_C_API=ON',
+        '-DENABLE_SHARED=OFF',
+        '-DENABLE_CLI=OFF',
+        '-DENABLE_PIC=OFF',
+        '-DENABLE_ASSEMBLY=ON',
+        '-DENABLE_LIBNUMA=OFF',
+        '-DENABLE_HDR10_PLUS=OFF',
+        '-DENABLE_SVT_HEVC=OFF',
+        '-DENABLE_LIBVMAF=OFF',
+        '-DENABLE_ALPHA=OFF',
+        '-DENABLE_MULTIVIEW=OFF',
+        '-DENABLE_SCC_EXT=OFF',
+        '-DENABLE_TESTS=OFF',
+        '-DDETAILED_CU_STATS=OFF',
+        '-DCHECKED_BUILD=OFF',
+        '-DWARNINGS_AS_ERRORS=OFF')
+    Invoke-Step "Configuring x265" { cmake @cmakeArgs }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] x265 cmake configure failed." -ForegroundColor Red
+        Pop-Location
+        exit 1
+    }
+    Invoke-Step "Building x265" { ninja -C source\build-xav x265-static }
+    Pop-Location
+    if (-not (Test-Path 'x265_git\source\build-xav\x265-static.lib')) {
+        Write-Host "[ERROR] x265-static.lib not found after x265 build." -ForegroundColor Red
+        exit 1
+    }
+    Copy-Item 'x265_git\source\build-xav\x265-static.lib' 'lib\x265.lib' -Force
+}
+
+function Build-X264 {
+    param([bool]$NoPrompt, [string]$MsysExe)
+    if (Test-Path 'lib\x264.lib') {
+        if ($NoPrompt) {
+            $choice = if ($ForceRebuild) { 'Y' } else { 'N' }
+        }
+        else {
+            Write-Host ""
+            Write-Host "[PROMPT] x264 is already compiled." -ForegroundColor Yellow
+            $choice = Read-Host "Do you want to update and recompile x264? (Y/N) [Default: N]"
+        }
+        if ($choice -notmatch '^[Yy]') {
+            Write-Host "[INFO] Skipping x264 compilation..." -ForegroundColor Cyan
+            return
+        }
+    }
+    if (Test-Path 'x264') {
+        Push-Location x264
+        git reset --hard
+        git pull
+        Pop-Location
+    }
+    else { git clone --depth 1 https://code.videolan.org/videolan/x264.git }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to clone https://code.videolan.org/videolan/x264.git into x264." -ForegroundColor Red
+        exit 1
+    }
+    Push-Location x264
+    Copy-Item @('..\patch\x264.sh', '..\patch\x264-cc-filter.sh') -Destination '.' -Force
+    $unixX264 = $PWD.Path -replace '\\', '/'
+    Invoke-Step "Building x264" {
+        & $MsysExe -lc "cd `"$unixX264`" && sh ./x264.sh"
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] x264 build failed." -ForegroundColor Red
+        Pop-Location
+        exit 1
+    }
+    Pop-Location
+    if (-not (Test-Path 'x264\libx264.a')) {
+        Write-Host "[ERROR] libx264.a not found after x264 build." -ForegroundColor Red
+        exit 1
+    }
+    Copy-Item 'x264\libx264.a' 'lib\x264.lib' -Force
+}
+
 function Build-Xav {
-    param([string]$Backend, [string]$SvtChoice, [bool]$enableTQ, [bool]$enableAvm, [bool]$enableVvenc)
+    param([string]$Backend, [string]$SvtChoice, [bool]$enableTQ, [bool]$enableAvm, [bool]$enableVvenc, [bool]$enableX265, [bool]$enableX264)
     $features = @()
     if ($enableAvm) { $features += "avm" }
     if ($enableVvenc) { $features += "vvenc" }
+    if ($enableX265) { $features += "x265" }
+    if ($enableX264) { $features += "x264" }
     if ($enableTQ) {
         $features += "vship"
         if ($Backend -eq 'cuda') { $features += "cuda" }
@@ -1415,6 +1544,28 @@ if ($NoPrompt) {
 }
 
 $enableVvenc = $vvencChoice -ieq 'Y'
+
+if ($NoPrompt) {
+    $x265Choice = if ($EnableX265) { 'Y' } else { 'N' }
+} else {
+    Write-Host ""
+    Write-Host "[PROMPT] Compile with x265 feature?" -ForegroundColor Yellow
+    $x265Choice = Read-Host "Enter choice (Y/N) [Default: Y]"
+    if (-not $x265Choice) { $x265Choice = 'Y' }
+}
+
+$enableX265 = $x265Choice -ieq 'Y'
+
+if ($NoPrompt) {
+    $x264Choice = if ($EnableX264) { 'Y' } else { 'N' }
+} else {
+    Write-Host ""
+    Write-Host "[PROMPT] Compile with x264 feature?" -ForegroundColor Yellow
+    $x264Choice = Read-Host "Enter choice (Y/N) [Default: Y]"
+    if (-not $x264Choice) { $x264Choice = 'Y' }
+}
+
+$enableX264 = $x264Choice -ieq 'Y'
 
 if ($NoPrompt) {
     $svtChoice = $SvtVariantId.ToString()
@@ -1548,7 +1699,13 @@ if ($enableVvenc) {
 if ($enableVvenc -and $enableTQ) {
     Build-Vvdec -NoPrompt $NoPrompt -MsysExe $msysExe
 }
+if ($enableX265) {
+    Build-X265 -NoPrompt $NoPrompt -MsysExe $msysExe
+}
+if ($enableX264) {
+    Build-X264 -NoPrompt $NoPrompt -MsysExe $msysExe
+}
 Build-SvtAv1 -Variant $svtVariant -Dir $svtDir -Branch $svtBranch -Repo $svtRepo -ExtraCFlags $svtExtraCFlags -ArchFlags $svtArchFlags -NoPrompt $NoPrompt -MsysExe $msysExe
-Build-Xav -Backend $vshipBackend -SvtChoice $svtChoice -enableTQ $enableTQ -enableAvm $enableAvm -enableVvenc $enableVvenc
+Build-Xav -Backend $vshipBackend -SvtChoice $svtChoice -enableTQ $enableTQ -enableAvm $enableAvm -enableVvenc $enableVvenc -enableX265 $enableX265 -enableX264 $enableX264
 
 Write-Host "[SUCCESS] Build script finished." -ForegroundColor Green

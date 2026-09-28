@@ -84,7 +84,7 @@ pub enum Stdio {
     Null,
     Piped,
 }
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 pub type Stdio = std::process::Stdio;
 
 #[cfg(target_os = "linux")]
@@ -136,7 +136,7 @@ pub struct Command {
     stdout: Stdio,
     stderr: Stdio,
 }
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 pub type Command = std::process::Command;
 
 #[cfg(target_os = "linux")]
@@ -287,7 +287,7 @@ pub struct Child {
     #[cfg(test)]
     pub stderr: Option<ChildStderr>,
 }
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 pub type Child = std::process::Child;
 
 #[cfg(target_os = "linux")]
@@ -335,7 +335,7 @@ pub struct ChildStdin(i32);
 pub struct ChildStdout(i32);
 #[cfg(all(target_os = "linux", test))]
 pub struct ChildStderr(i32);
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 pub type ChildStdin = std::process::ChildStdin;
 
 #[cfg(target_os = "linux")]

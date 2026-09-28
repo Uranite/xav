@@ -500,6 +500,28 @@ fn stamp_versions_win() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     }
 
+    #[cfg(feature = "x265")]
+    {
+        let x265 = format!("{manifest}/x265_git");
+        stamp(
+            "X265",
+            field(&format!("{x265}/x265Version.txt"), "releasetag:"),
+            &x265,
+        );
+        check_x265_layout(&x265, &format!("{x265}/source/build-xav"))?;
+    }
+
+    #[cfg(feature = "x264")]
+    {
+        let x264 = format!("{manifest}/x264");
+        stamp(
+            "X264",
+            field(&format!("{x264}/x264.h"), "#define X264_BUILD"),
+            &x264,
+        );
+        check_x264_layout(&x264)?;
+    }
+
     #[cfg(feature = "vship")]
     {
         let vship = format!("{manifest}/Vship");
@@ -662,6 +684,10 @@ fn build_windows() -> Result<(), Box<dyn Error + Send + Sync>> {
     println!("cargo:rustc-link-lib=legacy_stdio_definitions");
     #[cfg(all(feature = "vvenc", feature = "vship"))]
     println!("cargo:rustc-link-lib=static=vvdec");
+    #[cfg(feature = "x265")]
+    println!("cargo:rustc-link-lib=static=x265");
+    #[cfg(feature = "x264")]
+    println!("cargo:rustc-link-lib=static=x264");
     #[cfg(all(feature = "vship", not(feature = "cuda"), not(feature = "amd")))]
     println!("cargo:rustc-link-lib=vulkan-1");
 

@@ -16,6 +16,8 @@ Cargo.lock
 /avm
 /vvenc
 /vvdec
+/x264
+/x265_git
 
 # Build
 /target
