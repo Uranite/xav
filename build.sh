@@ -1228,7 +1228,7 @@ build_vvdec() {
                 sed -i '/^int VVDecImpl::decode(/,/not supported feature detected/s|^  if(|  if( false \&\& |' source/Lib/vvdec/vvdecimpl.cpp
                 sed -i '/^  if( !rcAccessUnit.payload )$/,/^  int iRet = VVDEC_OK;$/s|^  if(|  if( false \&\& |' source/Lib/vvdec/vvdecimpl.cpp
         }
-        sed -i '/^      bool bStartCodeFound = false;$/,/^      iAUEndPosVec.push_back( iLastPos );$/c\
+        sed -i '/^      bool bStartCodeFound = false;$/,/^      pushNalEndPos( rcAccessUnit.payloadUsedSize );$/c\
       const size_t iStartCodeSizeVec[1] = { rcAccessUnit.payload[2] == 1 ? (size_t)3 : (size_t)4 };\
       const size_t iStartCodePosVec[1] = { iStartCodeSizeVec[0] };\
       int iLastPos = rcAccessUnit.payloadUsedSize;\
