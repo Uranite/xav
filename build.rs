@@ -570,6 +570,9 @@ fn build_asm() -> Result<(), Box<dyn Error + Send + Sync>> {
         };
         if let Some(set) = set {
             let mut b = nasm_rs::Build::new();
+            if env::var("CARGO_FEATURE_5FISH").is_ok() {
+                b.define("B_FLAGS", "96");
+            }
             if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
                 b.archiver("llvm-lib");
             }

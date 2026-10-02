@@ -671,6 +671,9 @@ build_svtav1() {
 
         cd "${BUILD_DIR}/SVT-AV1"
 
+        local apply_shared_rtcd=1
+        [[ "${svt_fork_name}" == "5fish" ]] && apply_shared_rtcd=0
+
         sed -i 's/set(CMAKE_POSITION_INDEPENDENT_CODE ON)/set(CMAKE_POSITION_INDEPENDENT_CODE OFF)/' CMakeLists.txt
         sed -i 's/set(CMAKE_C_STANDARD 99)/set(CMAKE_C_STANDARD 23)/' CMakeLists.txt
         sed -i 's/set(CMAKE_CXX_STANDARD 11)/set(CMAKE_CXX_STANDARD 23)/' CMakeLists.txt
@@ -687,11 +690,14 @@ build_svtav1() {
         sed -i 's|0, // thread active when created|STACK_SIZE_PARAM_IS_A_RESERVATION, // thread active when created|' Source/Lib/Codec/svt_threads.c
         sed -i 's|const size_t min_stack_size = 1024 \* 1024;|const size_t min_stack_size = 8 * 1024 * 1024;|' Source/Lib/Codec/svt_threads.c
 
-        sed -i '/^    svt_aom_setup_common_rtcd_internal(scs->static_config.use_cpu_flags);$/,/^    svt_aom_build_blk_geom(scs->svt_aom_geom_idx, scs->blk_geom_mds);$/c\
+        sed -i 's|^        return_error = svt_av1_set_default_params(config_ptr);$|        return_error = config_ptr ? svt_av1_set_default_params(config_ptr) : EB_ErrorNone;|' Source/Lib/Globals/enc_handle.c
+
+        if ((apply_shared_rtcd)); then
+                sed -i '/^    svt_aom_setup_common_rtcd_internal(scs->static_config.use_cpu_flags);$/,/^    svt_aom_build_blk_geom(scs->svt_aom_geom_idx, scs->blk_geom_mds);$/c\
     return_error = svt_shared_setup(scs);\
     if (return_error != EB_ErrorNone)\
         return return_error;' Source/Lib/Globals/enc_handle.c
-        grep -q init_shared_rtcd Source/Lib/Globals/enc_handle.c || sed -i '/^DEFINE_ONCE(global_tables_once);$/a\
+                grep -q init_shared_rtcd Source/Lib/Globals/enc_handle.c || sed -i '/^DEFINE_ONCE(global_tables_once);$/a\
 \
 static uint64_t          shared_cpu_flags;\
 static uint32_t          shared_geom_idx;\
@@ -730,14 +736,25 @@ static EbErrorType svt_shared_setup(SequenceControlSet *scs) {\
     svt_aom_build_blk_geom(scs->svt_aom_geom_idx, scs->blk_geom_mds);\
     return EB_ErrorNone;\
 }' Source/Lib/Globals/enc_handle.c
-        sed -i 's|handle->scs_instance->scs->blk_geom_mds != NULL) {|handle->scs_instance->scs->blk_geom_mds != NULL \&\& handle->scs_instance->scs->blk_geom_mds != shared_blk_geom) {|' Source/Lib/Globals/enc_handle.c
-        sed -i 's|^        return_error = svt_av1_set_default_params(config_ptr);$|        return_error = config_ptr ? svt_av1_set_default_params(config_ptr) : EB_ErrorNone;|' Source/Lib/Globals/enc_handle.c
-        grep -q avx2 /proc/cpuinfo && sed -i '/^#ifndef CONFIG_X86_AVX2_IS_GUARANTEED$/,/^#endif$/s/       0$/       1/' Source/API/EbConfigMacros.h
-        sed -i 's|^        SET_FUNCTIONS_X86(ptr, neon, neon_dotprod, neon_i8mm, sve, sve2) *\\$|        SET_FUNCTIONS_X86(ptr, mmx, sse, sse2, sse3, ssse3, sse4_1, sse4_2, avx, avx2, avx512) \\|' Source/Lib/Codec/aom_dsp_rtcd.c Source/Lib/Codec/common_dsp_rtcd.c
+                sed -i 's|handle->scs_instance->scs->blk_geom_mds != NULL) {|handle->scs_instance->scs->blk_geom_mds != NULL \&\& handle->scs_instance->scs->blk_geom_mds != shared_blk_geom) {|' Source/Lib/Globals/enc_handle.c
+                sed -i 's|^        SET_FUNCTIONS_X86(ptr, neon, neon_dotprod, neon_i8mm, sve, sve2) *\\$|        SET_FUNCTIONS_X86(ptr, mmx, sse, sse2, sse3, ssse3, sse4_1, sse4_2, avx, avx2, avx512) \\|' Source/Lib/Codec/aom_dsp_rtcd.c Source/Lib/Codec/common_dsp_rtcd.c
+                sed -i 's|^    if (scs->static_config.encoder_bit_depth == EB_EIGHT_BIT) {$|    if (0) {|' Source/Lib/Globals/enc_handle.c
+                sed -i 's|^    if (validate_on_the_fly_settings(p_buffer,scs, enc_handle_ptr->scs_instance->config_mutex)) {$|    if (0) {|' Source/Lib/Globals/enc_handle.c
+                sed -i 's|^    EbErrorType return_error = svt_av1_verify_settings(scs);$|    EbErrorType return_error = EB_ErrorNone;|' Source/Lib/Globals/enc_handle.c
+        else
+                grep -q svt5fish_cpuinfo Source/Lib/Globals/enc_handle.c || {
+                        find third_party/cpuinfo -type f \( -name '*.c' -o -name '*.h' \) -exec sed -i 's/cpuinfo_/svt5fish_cpuinfo_/g' {} +
+                        sed -i 's/cpuinfo_/svt5fish_cpuinfo_/g' Source/Lib/Codec/common_dsp_rtcd.c Source/Lib/Globals/enc_handle.c
+                }
+                sed -i 's|^    if(validate_on_the_fly_settings(|    if(0 \&\& validate_on_the_fly_settings(|' Source/Lib/Globals/enc_handle.c
+                sed -i '/^    EbErrorType return_error = svt_av1_verify_settings($/,+1c\
+    EbErrorType return_error = EB_ErrorNone;' Source/Lib/Globals/enc_handle.c
+        fi
 
-        sed -i 's|^    if (scs->static_config.encoder_bit_depth == EB_EIGHT_BIT) {$|    if (0) {|' Source/Lib/Globals/enc_handle.c
-        sed -i 's|^    if (validate_on_the_fly_settings(p_buffer,scs, enc_handle_ptr->scs_instance->config_mutex)) {$|    if (0) {|' Source/Lib/Globals/enc_handle.c
-        sed -i 's|^    EbErrorType return_error = svt_av1_verify_settings(scs);$|    EbErrorType return_error = EB_ErrorNone;|' Source/Lib/Globals/enc_handle.c
+        if [[ -f Source/API/EbConfigMacros.h ]]; then
+                grep -q avx2 /proc/cpuinfo && sed -i '/^#ifndef CONFIG_X86_AVX2_IS_GUARANTEED$/,/^#endif$/s/       0$/       1/' Source/API/EbConfigMacros.h
+        fi
+
         sed -i 's|^            if (svt_aom_copy_metadata_buffer(dst, src->metadata) != EB_ErrorNone)$|            if (1)|' Source/Lib/Globals/enc_handle.c
 
         mkdir -p "${pgo_dir}"

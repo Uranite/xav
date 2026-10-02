@@ -29,7 +29,9 @@ extern __imp_CreateThread
 
 %define B_BUFFER 8
 %define B_FILLED 16
+%ifndef B_FLAGS
 %define B_FLAGS  104
+%endif
 
 %define F_PKT    32
 %define F_ST     40

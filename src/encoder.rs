@@ -792,8 +792,15 @@ pub fn set_svt_crf(conf: *mut EbSvtAv1EncConfiguration, crf: f32) {
     let qp = (c as u32).min(MAX_QP_VALUE);
     unsafe {
         (*conf).qp = qp;
-        (*conf).rate_control_mode = SVT_AV1_RC_MODE_CQP_OR_CRF;
-        (*conf).aq_mode = 2;
+        (*conf).rate_control_mode = SVT_AV1_RC_MODE_CQP_OR_CRF as _;
+        #[cfg(not(feature = "5fish"))]
+        {
+            (*conf).aq_mode = 2;
+        }
+        #[cfg(feature = "5fish")]
+        {
+            (*conf).enable_adaptive_quantization = 2;
+        }
         (*conf).extended_crf_qindex_offset = (ext - qp * 4) as u8;
     }
 }

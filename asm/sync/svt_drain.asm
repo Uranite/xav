@@ -29,7 +29,9 @@ extern pthread_create
 
 %define B_BUFFER 8
 %define B_FILLED 16
+%ifndef B_FLAGS
 %define B_FLAGS  104
+%endif
 
 %macro PKTBODY 0
     mov    rbp, [rsp]

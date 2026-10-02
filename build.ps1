@@ -425,6 +425,8 @@ function Patch-SvtAv1 {
     # should be fixed in mainline/tritium
     $apply8MbStackPatch = $Variant -notin @('svt-av1-tritium', 'svt-av1-skibidi', 'mainline')
 
+    $applySharedRtcdPatch = $Variant -ne '5fish'
+
     $patchScript = @'
 #!/bin/sh
 set -e
@@ -438,6 +440,14 @@ sed -i '/fstack-protector-strong/s/^/#/' CMakeLists.txt
 sed -i '/FORTIFY_SOURCE/s/^/#/' CMakeLists.txt
 sed -i '/gdwarf/s/^/#/' CMakeLists.txt
 sed -i '/gnull/s/^/#/' CMakeLists.txt
+sed -i 's|^        return_error = svt_av1_set_default_params(config_ptr);$|        return_error = config_ptr ? svt_av1_set_default_params(config_ptr) : EB_ErrorNone;|' Source/Lib/Globals/enc_handle.c
+sed -i 's|^            if (svt_aom_copy_metadata_buffer(dst, src->metadata) != EB_ErrorNone)$|            if (1)|' Source/Lib/Globals/enc_handle.c
+sed -i 's/void NOINLINE svt_aom_enc_make_inter_predictor(/void svt_aom_enc_make_inter_predictor(/' Source/Lib/Codec/enc_inter_prediction.c
+'@
+
+    if ($applySharedRtcdPatch) {
+        $patchScript += @'
+
 sed -i '/^    svt_aom_setup_common_rtcd_internal(scs->static_config.use_cpu_flags);$/,/^    svt_aom_build_blk_geom(scs->svt_aom_geom_idx, scs->blk_geom_mds);$/c\
     return_error = svt_shared_setup(scs);\
     if (return_error != EB_ErrorNone)\
@@ -482,14 +492,24 @@ static EbErrorType svt_shared_setup(SequenceControlSet *scs) {\
     return EB_ErrorNone;\
 }' Source/Lib/Globals/enc_handle.c
 sed -i 's|handle->scs_instance->scs->blk_geom_mds != NULL) {|handle->scs_instance->scs->blk_geom_mds != NULL \&\& handle->scs_instance->scs->blk_geom_mds != shared_blk_geom) {|' Source/Lib/Globals/enc_handle.c
-sed -i 's|^        return_error = svt_av1_set_default_params(config_ptr);$|        return_error = config_ptr ? svt_av1_set_default_params(config_ptr) : EB_ErrorNone;|' Source/Lib/Globals/enc_handle.c
 sed -i 's|^        SET_FUNCTIONS_X86(ptr, neon, neon_dotprod, neon_i8mm, sve, sve2) *\\$|        SET_FUNCTIONS_X86(ptr, mmx, sse, sse2, sse3, ssse3, sse4_1, sse4_2, avx, avx2, avx512) \\|' Source/Lib/Codec/aom_dsp_rtcd.c Source/Lib/Codec/common_dsp_rtcd.c
 sed -i 's|^    if (scs->static_config.encoder_bit_depth == EB_EIGHT_BIT) {$|    if (0) {|' Source/Lib/Globals/enc_handle.c
 sed -i 's|^    if (validate_on_the_fly_settings(p_buffer,scs, enc_handle_ptr->scs_instance->config_mutex)) {$|    if (0) {|' Source/Lib/Globals/enc_handle.c
 sed -i 's|^    EbErrorType return_error = svt_av1_verify_settings(scs);$|    EbErrorType return_error = EB_ErrorNone;|' Source/Lib/Globals/enc_handle.c
-sed -i 's|^            if (svt_aom_copy_metadata_buffer(dst, src->metadata) != EB_ErrorNone)$|            if (1)|' Source/Lib/Globals/enc_handle.c
-sed -i 's/void NOINLINE svt_aom_enc_make_inter_predictor(/void svt_aom_enc_make_inter_predictor(/' Source/Lib/Codec/enc_inter_prediction.c
 '@
+    }
+    else {
+        $patchScript += @'
+
+grep -q svt5fish_cpuinfo Source/Lib/Globals/enc_handle.c || {
+    find third_party/cpuinfo -type f \( -name '*.c' -o -name '*.h' \) -exec sed -i 's/cpuinfo_/svt5fish_cpuinfo_/g' {} +
+    sed -i 's/cpuinfo_/svt5fish_cpuinfo_/g' Source/Lib/Codec/common_dsp_rtcd.c Source/Lib/Globals/enc_handle.c
+}
+sed -i 's|^    if(validate_on_the_fly_settings(|    if(0 \&\& validate_on_the_fly_settings(|' Source/Lib/Globals/enc_handle.c
+sed -i '/^    EbErrorType return_error = svt_av1_verify_settings($/,+1c\
+    EbErrorType return_error = EB_ErrorNone;' Source/Lib/Globals/enc_handle.c
+'@
+    }
 
     if ($apply8MbStackPatch) {
         $patchScript += @'
@@ -505,8 +525,10 @@ sed -i 's|const size_t min_stack_size = 1024 \* 1024;|const size_t min_stack_siz
     if (Test-CpuFlag -MsysExe $MsysExe -Flag 'avx2') {
         $patchScript += @'
 
-sed -i 's/\r//g' Source/API/EbConfigMacros.h
-sed -i '/^#ifndef CONFIG_X86_AVX2_IS_GUARANTEED$/,/^#endif$/s/       0$/       1/' Source/API/EbConfigMacros.h
+if [ -f Source/API/EbConfigMacros.h ]; then
+    sed -i 's/\r//g' Source/API/EbConfigMacros.h
+    sed -i '/^#ifndef CONFIG_X86_AVX2_IS_GUARANTEED$/,/^#endif$/s/       0$/       1/' Source/API/EbConfigMacros.h
+fi
 '@
     }
 
@@ -1237,7 +1259,7 @@ grep -q 'false && !m_bInitialized' source/Lib/vvdec/vvdecimpl.cpp || {
     sed -i '/^int VVDecImpl::decode(/,/not supported feature detected/s|^  if(|  if( false \&\& |' source/Lib/vvdec/vvdecimpl.cpp
     sed -i '/^  if( !rcAccessUnit.payload )$/,/^  int iRet = VVDEC_OK;$/s|^  if(|  if( false \&\& |' source/Lib/vvdec/vvdecimpl.cpp
 }
-sed -i '/^      bool bStartCodeFound = false;$/,/^      iAUEndPosVec.push_back( iLastPos );$/c\
+sed -i '/^      bool bStartCodeFound = false;$/,/^      pushNalEndPos( rcAccessUnit.payloadUsedSize );$/c\
       const size_t iStartCodeSizeVec[1] = { rcAccessUnit.payload[2] == 1 ? (size_t)3 : (size_t)4 };\
       const size_t iStartCodePosVec[1] = { iStartCodeSizeVec[0] };\
       int iLastPos = rcAccessUnit.payloadUsedSize;\
@@ -1574,7 +1596,7 @@ if ($NoPrompt) {
     Write-Host "[PROMPT] Select SVT-AV1 variant to compile:" -ForegroundColor Yellow
 Write-Host "  1. svt-av1-hdr       (https://github.com/juliobbv-p/svt-av1-hdr)"
 Write-Host "  2. svt-av1-essential (https://github.com/nekotrix/SVT-AV1-Essential)"
-Write-Host "  3. 5fish             (https://github.com/5fish/svt-av1-psy)"
+Write-Host "  3. 5fish             (https://github.com/5fish/SVT-AV1)"
 Write-Host "  4. svt-av1-tritium   (https://github.com/Uranite/svt-av1-tritium)"
 Write-Host "  5. svt-av1-skibidi   (https://github.com/Uranite/svt-av1-skibidi)"
 Write-Host "  6. mainline          (https://gitlab.com/AOMediaCodec/SVT-AV1)"
@@ -1585,7 +1607,7 @@ $svtChoice = Read-Host "Enter choice (1-6) [Default: 1]"
 switch ($svtChoice) {
     '1' { $svtVariant = 'svt-av1-hdr'; $svtRepo = 'https://github.com/juliobbv-p/svt-av1-hdr.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
     '2' { $svtVariant = 'svt-av1-essential'; $svtRepo = 'https://github.com/nekotrix/SVT-AV1-Essential.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
-    '3' { $svtVariant = '5fish'; $svtRepo = 'https://github.com/5fish/svt-av1-psy.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '-DSVT_LOG_QUIET' }
+    '3' { $svtVariant = '5fish'; $svtRepo = 'https://github.com/5fish/SVT-AV1.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '-DSVT_LOG_QUIET' }
     '4' { $svtVariant = 'svt-av1-tritium'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
     '5' { $svtVariant = 'svt-av1-skibidi'; $svtRepo = 'https://github.com/Uranite/svt-av1-skibidi.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
     '6' { $svtVariant = 'mainline'; $svtRepo = 'https://gitlab.com/AOMediaCodec/SVT-AV1.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
