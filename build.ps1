@@ -440,6 +440,7 @@ sed -i '/fstack-protector-strong/s/^/#/' CMakeLists.txt
 sed -i '/FORTIFY_SOURCE/s/^/#/' CMakeLists.txt
 sed -i '/gdwarf/s/^/#/' CMakeLists.txt
 sed -i '/gnull/s/^/#/' CMakeLists.txt
+sed -i 's/^    if (p_handle == NULL || config_ptr == NULL) {$/    if (p_handle == NULL) {/' Source/Lib/Globals/enc_handle.c
 sed -i 's|^        return_error = svt_av1_set_default_params(config_ptr);$|        return_error = config_ptr ? svt_av1_set_default_params(config_ptr) : EB_ErrorNone;|' Source/Lib/Globals/enc_handle.c
 sed -i 's|^            if (svt_aom_copy_metadata_buffer(dst, src->metadata) != EB_ErrorNone)$|            if (1)|' Source/Lib/Globals/enc_handle.c
 sed -i 's/void NOINLINE svt_aom_enc_make_inter_predictor(/void svt_aom_enc_make_inter_predictor(/' Source/Lib/Codec/enc_inter_prediction.c
@@ -1599,7 +1600,7 @@ Write-Host "  2. svt-av1-essential (https://github.com/nekotrix/SVT-AV1-Essentia
 Write-Host "  3. 5fish             (https://github.com/5fish/SVT-AV1)"
 Write-Host "  4. svt-av1-tritium   (https://github.com/Uranite/svt-av1-tritium)"
 Write-Host "  5. svt-av1-skibidi   (https://github.com/Uranite/svt-av1-skibidi)"
-Write-Host "  6. mainline          (https://gitlab.com/AOMediaCodec/SVT-AV1)"
+Write-Host "  6. mainline          (https://github.com/AOMediaCodec/SVT-AV1)"
 $svtChoice = Read-Host "Enter choice (1-6) [Default: 1]"
     if (-not $svtChoice) { $svtChoice = '1' }
 }
@@ -1610,7 +1611,7 @@ switch ($svtChoice) {
     '3' { $svtVariant = '5fish'; $svtRepo = 'https://github.com/5fish/SVT-AV1.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '-DSVT_LOG_QUIET' }
     '4' { $svtVariant = 'svt-av1-tritium'; $svtRepo = 'https://github.com/Uranite/svt-av1-tritium.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
     '5' { $svtVariant = 'svt-av1-skibidi'; $svtRepo = 'https://github.com/Uranite/svt-av1-skibidi.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
-    '6' { $svtVariant = 'mainline'; $svtRepo = 'https://gitlab.com/AOMediaCodec/SVT-AV1.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
+    '6' { $svtVariant = 'mainline'; $svtRepo = 'https://github.com/AOMediaCodec/SVT-AV1.git'; $svtBranch = ''; $svtDir = 'SVT-AV1'; $svtExtraCFlags = '' }
     default {
         Write-Host "[ERROR] Invalid choice." -ForegroundColor Red
         exit 1
