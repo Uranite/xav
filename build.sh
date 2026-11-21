@@ -690,6 +690,7 @@ build_svtav1() {
         sed -i 's|0, // thread active when created|STACK_SIZE_PARAM_IS_A_RESERVATION, // thread active when created|' Source/Lib/Codec/svt_threads.c
         sed -i 's|const size_t min_stack_size = 1024 \* 1024;|const size_t min_stack_size = 8 * 1024 * 1024;|' Source/Lib/Codec/svt_threads.c
 
+        sed -i 's/^    if (p_handle == NULL || config_ptr == NULL) {$/    if (p_handle == NULL) {/' Source/Lib/Globals/enc_handle.c
         sed -i 's|^        return_error = svt_av1_set_default_params(config_ptr);$|        return_error = config_ptr ? svt_av1_set_default_params(config_ptr) : EB_ErrorNone;|' Source/Lib/Globals/enc_handle.c
 
         if ((apply_shared_rtcd)); then
@@ -1329,7 +1330,7 @@ SVT_FORK_NAMES=("hdr" "essential" "mainline" "5fish" "tritium" "skibidi")
 SVT_FORK_URLS=(
         "https://github.com/juliobbv-p/svt-av1-hdr"
         "https://github.com/nekotrix/SVT-AV1-Essential"
-        "https://gitlab.com/AOMediaCodec/SVT-AV1"
+        "https://github.com/AOMediaCodec/SVT-AV1"
         "https://github.com/5fish/SVT-AV1"
         "https://github.com/Uranite/SVT-AV1-Tritium"
         "https://github.com/Uranite/svt-av1-skibidi"
