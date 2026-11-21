@@ -588,8 +588,8 @@ function Build-SvtAv1 {
     Invoke-Step "Configuring $Variant (PGO Gen)" {
         cmake -B svt_build_gen -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF `
             -DSVT_AV1_LTO=OFF -DLIBDOVI_FOUND=0 -DLIBHDR10PLUS_RS_FOUND=0 -DENABLE_AVX512="$svtAvx512Flag" `
-            -DCMAKE_CXX_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -fprofile-generate=$pgoDir" `
-            -DCMAKE_C_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -fprofile-generate=$pgoDir" `
+            -DCMAKE_CXX_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -mprefer-vector-width=128 -fprofile-generate=$pgoDir" `
+            -DCMAKE_C_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -mprefer-vector-width=128 -fprofile-generate=$pgoDir" `
             -DLOG_QUIET=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_OUTPUT_DIRECTORY=svt_build_gen
     }
 
@@ -644,8 +644,8 @@ function Build-SvtAv1 {
     Invoke-Step "Configuring $Variant (PGO Use)" {
         cmake -B svt_build_use -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF `
             -DSVT_AV1_LTO=OFF -DLIBDOVI_FOUND=0 -DLIBHDR10PLUS_RS_FOUND=0 -DENABLE_AVX512="$svtAvx512Flag" `
-            -DCMAKE_CXX_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -fprofile-use=$profdata" `
-            -DCMAKE_C_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -fprofile-use=$profdata" `
+            -DCMAKE_CXX_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -mprefer-vector-width=128 -fprofile-use=$profdata" `
+            -DCMAKE_C_FLAGS_RELEASE="-flto -DNDEBUG -O2 $ArchFlags $ExtraCFlags -mprefer-vector-width=128 -fprofile-use=$profdata" `
             -DLOG_QUIET=ON -DBUILD_APPS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_OUTPUT_DIRECTORY=svt_build_use
     }
 
